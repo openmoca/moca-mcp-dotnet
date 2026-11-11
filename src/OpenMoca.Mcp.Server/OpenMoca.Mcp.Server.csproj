@@ -15,6 +15,7 @@
     <PackageProjectUrl>https://github.com/openmoca/moca-mcp-dotnet</PackageProjectUrl>
     <RepositoryUrl>https://github.com/openmoca/moca-mcp-dotnet</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageTags>mcp;moca;openmoca;rag;citations;knowledge</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
@@ -32,6 +33,7 @@
   <ItemGroup>
     <EmbeddedResource Include="definitions.json" LogicalName="OpenMoca.Mcp.definitions.json" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

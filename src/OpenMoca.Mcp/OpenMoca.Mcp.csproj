@@ -22,6 +22,7 @@
     <PackageProjectUrl>https://github.com/openmoca/moca-mcp-dotnet</PackageProjectUrl>
     <RepositoryUrl>https://github.com/openmoca/moca-mcp-dotnet</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageTags>mcp;moca;openmoca;rag;citations;knowledge</PackageTags>
   </PropertyGroup>
 
@@ -31,6 +32,7 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
     <!-- The MCP Registry entry, also in the package where MCP clients that install from NuGet look for it. -->
     <None Include="..\..\server.json" Pack="true" PackagePath=".mcp" />
   </ItemGroup>
