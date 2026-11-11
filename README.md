@@ -227,9 +227,8 @@ with the text it receives is governed by them, not by this server.
 
 ## Develop
 
-Clone [moca-spec](https://github.com/openmoca/moca-spec) and
-[moca-reader-dotnet](https://github.com/openmoca/moca-reader-dotnet) beside
-this repository (or set `MOCA_SPEC_DIR`), then:
+Clone [moca-spec](https://github.com/openmoca/moca-spec) beside this repository
+(or set `MOCA_SPEC_DIR`), then:
 
 ```sh
 dotnet build moca-mcp-dotnet.slnx

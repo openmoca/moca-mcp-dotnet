@@ -9,6 +9,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\moca-reader-dotnet\src\OpenMoca.Reader\OpenMoca.Reader.csproj" />
+    <PackageReference Include="OpenMoca.Reader" />
   </ItemGroup>
 </Project>

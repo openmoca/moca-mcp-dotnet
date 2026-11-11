@@ -16,11 +16,9 @@ permissions:
   contents: read
 
 # The other MOCA repositories, at fixed refs: release tags, or commits before a release; never a branch
-# (moca-spec CONTRIBUTING.md). Until OpenMoca.Reader 0.6.0 is on NuGet, the server builds against
-# moca-reader-dotnet checked out beside it.
+# (moca-spec CONTRIBUTING.md).
 env:
   MOCA_SPEC_REF: v0.6.0
-  MOCA_READER_DOTNET_REF: v0.6.0
 
 jobs:
   deps:
@@ -62,12 +60,6 @@ jobs:
           repository: ${{ github.repository_owner }}/moca-spec
           ref: ${{ env.MOCA_SPEC_REF }}
           path: moca-spec
-          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
-      - uses: actions/checkout@v7
-        with:
-          repository: ${{ github.repository_owner }}/moca-reader-dotnet
-          ref: ${{ env.MOCA_READER_DOTNET_REF }}
-          path: moca-reader-dotnet
           token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
       - uses: actions/setup-dotnet@v6
         with:

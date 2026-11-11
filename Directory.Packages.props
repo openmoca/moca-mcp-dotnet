@@ -1,11 +1,18 @@
 <!--
   Central package management: every NuGet version lives here, once.
-  The Reader's own packages come with OpenMoca.Reader and are versioned in moca-reader-dotnet.
+  The Reader's packages are versioned together, in moca-reader-dotnet.
 -->
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
+
+  <!-- The .NET Reader, with its standard embedding models and offline Sigstore verification. -->
+  <ItemGroup>
+    <PackageVersion Include="OpenMoca.Reader" Version="0.6.0" />
+    <PackageVersion Include="OpenMoca.Reader.Onnx" Version="0.6.0" />
+    <PackageVersion Include="OpenMoca.Reader.Sigstore" Version="0.6.0" />
+  </ItemGroup>
 
   <!-- The server: the official MCP C# SDK, its core only (no hosting or ASP.NET). -->
   <ItemGroup>

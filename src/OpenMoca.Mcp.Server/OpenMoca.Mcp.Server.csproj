@@ -20,11 +20,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- A project reference until the Reader is on NuGet at 0.6.0; then PackageReference OpenMoca.Reader.Onnx (which
-         brings OpenMoca.Reader). -->
-    <ProjectReference Include="..\..\..\moca-reader-dotnet\src\OpenMoca.Reader.Onnx\OpenMoca.Reader.Onnx.csproj" />
+    <!-- OpenMoca.Reader.Onnx brings OpenMoca.Reader. -->
+    <PackageReference Include="OpenMoca.Reader.Onnx" />
     <!-- Offline Sigstore verification against the trust root's sigstore.trustedRoot (attestations §6). -->
-    <ProjectReference Include="..\..\..\moca-reader-dotnet\src\OpenMoca.Reader.Sigstore\OpenMoca.Reader.Sigstore.csproj" />
+    <PackageReference Include="OpenMoca.Reader.Sigstore" />
     <PackageReference Include="ModelContextProtocol.Core" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
