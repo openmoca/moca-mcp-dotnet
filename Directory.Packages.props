@@ -18,8 +18,8 @@
   <ItemGroup>
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.3.0" />
     <!-- The library's extension points: dependency injection and logging abstractions only, at the SDK's version. -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="11.0.0" />
   </ItemGroup>
 
   <!-- Tests -->
