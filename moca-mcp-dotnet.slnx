@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpenMoca.Mcp/OpenMoca.Mcp.csproj" />
+    <Project Path="src/OpenMoca.Mcp.Server/OpenMoca.Mcp.Server.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/OpenMoca.Mcp.Scale/OpenMoca.Mcp.Scale.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpenMoca.Mcp.Tests/OpenMoca.Mcp.Tests.csproj" />
+  </Folder>
+</Solution>

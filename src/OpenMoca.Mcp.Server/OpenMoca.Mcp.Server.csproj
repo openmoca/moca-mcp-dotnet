@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The MOCA MCP server as a library: the tools, resources and package handling of moca-mcp, with extension points
+    (package source, embedder, search hooks, logging) so a host can plug in its own. The moca-mcp program is a thin
+    host over it. No hosting, ASP.NET or transport choices here: a host picks its own.
+  -->
+  <PropertyGroup>
+    <RootNamespace>OpenMoca.Mcp</RootNamespace>
+    <PackageId>OpenMoca.Mcp.Server</PackageId>
+    <Version>0.6.0</Version>
+    <Description>The MOCA MCP server as a library: serve MOCA knowledge packages over the Model Context Protocol from your own host, with your own package source or embedder.</Description>
+    <Authors>MOCA Standard Contributors</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/openmoca/moca-mcp-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/openmoca/moca-mcp-dotnet</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>mcp;moca;openmoca;rag;citations;knowledge</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A project reference until the Reader is on NuGet at 0.6.0; then PackageReference OpenMoca.Reader.Onnx (which
+         brings OpenMoca.Reader). -->
+    <ProjectReference Include="..\..\..\moca-reader-dotnet\src\OpenMoca.Reader.Onnx\OpenMoca.Reader.Onnx.csproj" />
+    <!-- Offline Sigstore verification against the trust root's sigstore.trustedRoot (attestations §6). -->
+    <ProjectReference Include="..\..\..\moca-reader-dotnet\src\OpenMoca.Reader.Sigstore\OpenMoca.Reader.Sigstore.csproj" />
+    <PackageReference Include="ModelContextProtocol.Core" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="definitions.json" LogicalName="OpenMoca.Mcp.definitions.json" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="moca-mcp" />
+    <InternalsVisibleTo Include="OpenMoca.Mcp.Tests" />
+  </ItemGroup>
+</Project>

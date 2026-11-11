@@ -1,0 +1,501 @@
+{
+  "$comment": "Calls every build of moca-mcp must answer as expected.json records. Paths are relative to moca-spec. ParityTests starts the server with each scenario's arguments, makes the calls, and compares: tool definitions, results (numbers within 1e-9), resource lists and reads, and refusals. Add a case with its expected answer when a tool or parameter changes.",
+  "scenarios": [
+    {
+      "name": "support knowledge base and policy versions, public audience",
+      "args": [
+        "examples/support-kb=examples/sidecars/support-kb.moca.idx",
+        "examples/policy-corpus/retention-2025",
+        "examples/policy-corpus/retention-2026",
+        "--trust-root",
+        "fixtures/signing-keys/trust-root.json",
+        "--audience",
+        "public"
+      ],
+      "calls": [
+        {
+          "tool": "moca_list_packages",
+          "arguments": {}
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund window"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customer records retention",
+            "detail": "full"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customer records retention"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "remboursement",
+            "locale": "fr"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "delete my account"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "shipping",
+            "limit": 1
+          }
+        },
+        {
+          "tool": "moca_get_node",
+          "arguments": {
+            "node_id": "https://example.com/moca/support-kb#refund-window.md"
+          }
+        },
+        {
+          "tool": "moca_get_node",
+          "arguments": {
+            "node_id": "https://example.com/moca/support-kb#refund-window.md",
+            "locale": "fr"
+          }
+        },
+        {
+          "tool": "moca_get_node",
+          "arguments": {
+            "node_id": "https://example.com/moca/support-kb#account-deletion.md"
+          }
+        },
+        {
+          "tool": "moca_get_node",
+          "arguments": {
+            "node_id": "https://example.com/moca/support-kb#no-such-node.md"
+          }
+        },
+        {
+          "resources": "list"
+        },
+        {
+          "resources": "templates"
+        },
+        {
+          "resources": "read",
+          "uri": "moca://node/https%3A%2F%2Fexample.com%2Fmoca%2Fsupport-kb%404.2.0%23refund-window.md"
+        },
+        {
+          "resources": "read",
+          "uri": "moca://node/https%3A%2F%2Fexample.com%2Fmoca%2Fsupport-kb%404.2.0%23account-deletion.md",
+          "refused": true
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": ""
+          },
+          "refused": true
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund",
+            "limit": 21
+          },
+          "refused": true
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund",
+            "locale": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          "refused": true
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund",
+            "detail": "everything"
+          },
+          "refused": true
+        }
+      ]
+    },
+    {
+      "name": "incident response with an organisation overlay",
+      "args": [
+        "examples/handbook/incident-response",
+        "--overlay",
+        "organisation=conformance/fixtures/overlays/organisation-review.ttl"
+      ],
+      "calls": [
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "sequence",
+            "iri": "https://example.org/handbook/incident#ResponseSteps"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "requires",
+            "iri": "https://example.org/handbook/incident#ResolveAndReview",
+            "transitive": true
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "requires",
+            "iri": "https://example.org/handbook/incident#ResolveAndReview"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "required_by",
+            "iri": "https://example.org/handbook/incident#AssessSeverity"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "concept",
+            "iri": "https://example.org/handbook/incident#IncidentResponse"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "parts",
+            "iri": "https://example.org/handbook/incident#IncidentResponse"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "nodes",
+            "iri": "https://example.org/handbook/incident#IncidentResponse",
+            "include": "parts"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "nodes",
+            "iri": "https://example.org/handbook/incident#NotifyCustomers",
+            "detail": "full"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "concept",
+            "iri": "https://example.org/handbook/incident#NoSuchConcept"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customers",
+            "scope": "https://example.org/handbook/incident#NotifyCustomers"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "everything",
+            "iri": "https://example.org/handbook/incident#IncidentResponse"
+          },
+          "refused": true
+        }
+      ]
+    },
+    {
+      "name": "the Acme support knowledge base, every audience",
+      "args": [
+        "examples/acme-support",
+        "--trust-root",
+        "fixtures/signing-keys/trust-root.json"
+      ],
+      "calls": [
+        {
+          "tool": "moca_list_packages",
+          "arguments": {}
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "how long do refunds take"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "colis en retard",
+            "locale": "fr",
+            "limit": 3
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund",
+            "concepts": [
+              "https://example.com/moca/acme-support/topics#Returns"
+            ]
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund",
+            "scope": "https://example.com/moca/acme-support/topics#Returns",
+            "detail": "full"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "concept",
+            "iri": "https://example.com/moca/acme-support/topics#AcmeSupport"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "parts",
+            "iri": "https://example.com/moca/acme-support/topics#AcmeSupport"
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "narrower",
+            "iri": "https://example.com/moca/acme-support/topics#Returns",
+            "transitive": true
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "nodes",
+            "iri": "https://example.com/moca/acme-support/topics#Returns",
+            "include": "both"
+          }
+        },
+        {
+          "resources": "list"
+        }
+      ]
+    },
+    {
+      "name": "a composed handbook with its members",
+      "args": [
+        "examples/handbook/handbook",
+        "--members",
+        "examples/handbook"
+      ],
+      "calls": [
+        {
+          "tool": "moca_list_packages",
+          "arguments": {}
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "who owns a service"
+          }
+        },
+        {
+          "resources": "list"
+        }
+      ]
+    },
+    {
+      "name": "the examples folder as a library, loaded on use",
+      "args": [
+        "--library",
+        "examples",
+        "--trust-root",
+        "fixtures/signing-keys/trust-root.json"
+      ],
+      "calls": [
+        {
+          "tool": "moca_list_packages",
+          "arguments": {}
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund window",
+            "packages": [
+              "https://example.com/moca/support-kb"
+            ]
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customer records retention",
+            "packages": [
+              "https://example.com/moca/policies/data-retention@1.0.0"
+            ]
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customer records retention",
+            "packages": [
+              "https://example.com/moca/policies/data-retention@1.0.0"
+            ]
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customer records retention",
+            "packages": [
+              "https://example.com/moca/policies/data-retention"
+            ]
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "who owns a service",
+            "packages": [
+              "https://example.com/moca/handbook"
+            ]
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund",
+            "packages": [
+              "https://example.com/moca/nope"
+            ]
+          }
+        },
+        {
+          "tool": "moca_structure",
+          "arguments": {
+            "op": "nodes",
+            "iri": "https://example.com/moca/acme-support/topics#Returns",
+            "include": "both",
+            "packages": [
+              "https://example.com/moca/acme-support"
+            ]
+          }
+        },
+        {
+          "tool": "moca_get_node",
+          "arguments": {
+            "node_id": "https://example.com/moca/acme-support#returns/refund-window.md"
+          }
+        },
+        {
+          "tool": "moca_package_info",
+          "arguments": {
+            "package": "https://example.com/moca/acme-support"
+          }
+        },
+        {
+          "tool": "moca_package_info",
+          "arguments": {
+            "package": "https://example.com/moca/nope"
+          }
+        },
+        {
+          "tool": "moca_list_packages",
+          "arguments": {}
+        },
+        {
+          "resources": "list"
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund",
+            "packages": [
+              "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ]
+          },
+          "refused": true
+        },
+        {
+          "tool": "moca_package_info",
+          "arguments": {},
+          "refused": true
+        }
+      ]
+    },
+    {
+      "name": "a library over a small memory budget",
+      "args": [
+        "--library",
+        "examples/policy-corpus",
+        "examples/minimal",
+        "--max-loaded-pages",
+        "1"
+      ],
+      "calls": [
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customer records"
+          }
+        },
+        {
+          "tool": "moca_list_packages",
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "name": "host opt-ins: unlabelled content, excluded content",
+      "args": [
+        "examples/support-kb",
+        "examples/policy-corpus/retention-2025",
+        "examples/policy-corpus/retention-2026",
+        "--trust-root",
+        "fixtures/signing-keys/trust-root.json",
+        "--audience",
+        "public",
+        "--allow-unlabelled",
+        "--include-excluded"
+      ],
+      "calls": [
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "customer records retention"
+          }
+        },
+        {
+          "tool": "moca_search",
+          "arguments": {
+            "query": "refund"
+          }
+        },
+        {
+          "tool": "moca_get_node",
+          "arguments": {
+            "node_id": "https://example.com/moca/policies/data-retention@1.0.0#customer-records.md"
+          }
+        }
+      ]
+    }
+  ]
+}

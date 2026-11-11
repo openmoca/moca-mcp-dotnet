@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    moca-mcp for .NET: serves MOCA packages to any MCP client over stdio, with the same tools, resources and answers
+    as tests/parity expects. Published two ways:
+      - self-contained single files, one per platform, needing no runtime (the release workflow);
+      - a .NET tool, OpenMoca.Mcp: dotnet tool install -g OpenMoca.Mcp.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>OpenMoca.Mcp</RootNamespace>
+    <AssemblyName>moca-mcp</AssemblyName>
+    <Version>0.6.0</Version>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <PackageId>OpenMoca.Mcp</PackageId>
+    <Description>An MCP server for MOCA knowledge packages: search, navigate and cite them from any MCP client.</Description>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>moca-mcp</ToolCommandName>
+    <Authors>MOCA Standard Contributors</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/openmoca/moca-mcp-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/openmoca/moca-mcp-dotnet</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>mcp;moca;openmoca;rag;citations;knowledge</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenMoca.Mcp.Server\OpenMoca.Mcp.Server.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <!-- The MCP Registry entry, also in the package where MCP clients that install from NuGet look for it. -->
+    <None Include="..\..\server.json" Pack="true" PackagePath=".mcp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenMoca.Mcp.Tests" />
+  </ItemGroup>
+</Project>

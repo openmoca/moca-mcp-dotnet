@@ -1,0 +1,11 @@
+# Weekly update PRs, and immediate PRs for security advisories (ADR-0002).
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,87 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md']
+  pull_request:
+    paths-ignore: ['**/*.md']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# The other MOCA repositories, at fixed refs: release tags, or commits before a release; never a branch
+# (moca-spec CONTRIBUTING.md). Until OpenMoca.Reader 0.6.0 is on NuGet, the server builds against
+# moca-reader-dotnet checked out beside it.
+env:
+  MOCA_SPEC_REF: v0.6.0
+  MOCA_READER_DOTNET_REF: v0.6.0
+
+jobs:
+  deps:
+    name: Public dependencies only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: moca-mcp-dotnet
+      # The check lives in moca-spec, the one copy every open repository runs.
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/moca-spec
+          ref: ${{ env.MOCA_SPEC_REF }}
+          path: moca-spec
+          # Read access to the other MOCA repos while they are private.
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node moca-spec/scripts/check-deps.mjs moca-mcp-dotnet
+
+  test:
+    name: Test, with the expected answers (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: moca-mcp-dotnet
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/moca-spec
+          ref: ${{ env.MOCA_SPEC_REF }}
+          path: moca-spec
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/moca-reader-dotnet
+          ref: ${{ env.MOCA_READER_DOTNET_REF }}
+          path: moca-reader-dotnet
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: moca-mcp-dotnet/global.json
+      - run: dotnet build moca-mcp-dotnet.slnx -c Release
+        working-directory: moca-mcp-dotnet
+      # One standard model for the semantic tests, fetched by the server's own command (pinned commit and SHA-256).
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/models
+          key: models-bge-small-en-v1.5-ea104dacec62c0de699686887e3f920caeb4f3e3
+      - run: dotnet src/OpenMoca.Mcp/bin/Release/net10.0/moca-mcp.dll models add bge-small-en-v1.5 --models "$RUNNER_TEMP/models"
+        working-directory: moca-mcp-dotnet
+      - run: dotnet test --project tests/OpenMoca.Mcp.Tests -c Release --no-build
+        working-directory: moca-mcp-dotnet
+        env:
+          MOCA_TEST_MODELS: ${{ runner.temp }}/models

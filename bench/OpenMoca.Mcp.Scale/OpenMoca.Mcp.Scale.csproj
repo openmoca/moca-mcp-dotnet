@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The scale benchmark: generates libraries of synthetic packages and measures what the server's limits rest on.
+       Not part of the test run. Run it with: dotnet run, in Release, on this project. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\moca-reader-dotnet\src\OpenMoca.Reader\OpenMoca.Reader.csproj" />
+  </ItemGroup>
+</Project>

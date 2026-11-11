@@ -1,0 +1,23 @@
+<!--
+  Central package management: every NuGet version lives here, once.
+  The Reader's own packages come with OpenMoca.Reader and are versioned in moca-reader-dotnet.
+-->
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- The server: the official MCP C# SDK, its core only (no hosting or ASP.NET). -->
+  <ItemGroup>
+    <PackageVersion Include="ModelContextProtocol.Core" Version="2.3.0" />
+    <!-- The library's extension points: dependency injection and logging abstractions only, at the SDK's version. -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+  </ItemGroup>
+
+  <!-- Tests -->
+  <ItemGroup>
+    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
+  </ItemGroup>
+</Project>

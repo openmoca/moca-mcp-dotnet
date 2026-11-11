@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.openmoca/moca-mcp",
+  "title": "MOCA",
+  "description": "Search and cite MOCA knowledge packages, verified and with citation records, on your machine.",
+  "version": "0.6.0",
+  "websiteUrl": "https://openmoca.org/tools/mcp/",
+  "repository": {
+    "url": "https://github.com/openmoca/moca-mcp-dotnet",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "nuget",
+      "registryBaseUrl": "https://api.nuget.org/v3/index.json",
+      "identifier": "OpenMoca.Mcp",
+      "version": "0.6.0",
+      "transport": { "type": "stdio" },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--library",
+          "description": "A folder of MOCA packages (.moca files or package folders) to serve. Indexes beside them are used by name.",
+          "format": "filepath",
+          "isRequired": true,
+          "isRepeated": true
+        },
+        {
+          "type": "named",
+          "name": "--trust-root",
+          "description": "A trust root JSON file: the keys whose signatures and reviews count. Without one, nothing is reported as signed or reviewed.",
+          "format": "filepath"
+        },
+        {
+          "type": "named",
+          "name": "--audience",
+          "description": "The audiences this assistant may serve, comma-separated, such as public. Pages for other audiences are never returned."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+name: Release
+
+# Push a vX.Y.Z tag: builds the six self-contained files, attaches them with their SHA-256 sums to a GitHub
+# release, and publishes the OpenMoca.Mcp .NET tool and the OpenMoca.Mcp.Server library to NuGet.
+#
+# The builds are unsigned for now. macOS builds run on macOS, so the SDK gives each one the ad-hoc signature Apple
+# silicon needs to run it at all. When the signing certificates are in place, sign and notarise the macOS files and
+# sign the Windows files here, with the secrets held only in this workflow.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MOCA_READER_DOTNET_REF: v0.6.0
+
+jobs:
+  build:
+    name: Build ${{ matrix.rid }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { rid: win-x64, os: ubuntu-latest }
+          - { rid: win-arm64, os: ubuntu-latest }
+          - { rid: linux-x64, os: ubuntu-latest }
+          - { rid: linux-arm64, os: ubuntu-latest }
+          - { rid: osx-x64, os: macos-latest }
+          - { rid: osx-arm64, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: moca-mcp-dotnet
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/moca-reader-dotnet
+          ref: ${{ env.MOCA_READER_DOTNET_REF }}
+          path: moca-reader-dotnet
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: moca-mcp-dotnet/global.json
+      - name: Publish
+        working-directory: moca-mcp-dotnet
+        run: >
+          dotnet publish src/OpenMoca.Mcp -c Release -r ${{ matrix.rid }} --self-contained
+          -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none -p:AllowedReferenceRelatedFileExtensions=none
+          -o ../out/${{ matrix.rid }}
+      - name: Zip
+        working-directory: out/${{ matrix.rid }}
+        run: |
+          cp ../../moca-mcp-dotnet/LICENSE ../../moca-mcp-dotnet/NOTICE ../../moca-mcp-dotnet/README.md .
+          zip -q ../moca-mcp-${{ matrix.rid }}.zip *
+      - uses: actions/upload-artifact@v7
+        with:
+          name: moca-mcp-${{ matrix.rid }}
+          path: out/moca-mcp-${{ matrix.rid }}.zip
+
+  release:
+    name: Release and publish
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: moca-mcp-dotnet
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/moca-reader-dotnet
+          ref: ${{ env.MOCA_READER_DOTNET_REF }}
+          path: moca-reader-dotnet
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA-256 sums
+        working-directory: dist
+        run: sha256sum *.zip > SHA256SUMS
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" \
+            --notes "See CHANGELOG.md. Unsigned builds: the README says what macOS and Windows show the first time."
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: moca-mcp-dotnet/global.json
+      - name: Pack and publish the .NET tool and the library
+        working-directory: moca-mcp-dotnet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet pack src/OpenMoca.Mcp.Server -c Release -o ../nupkg
+          dotnet pack src/OpenMoca.Mcp -c Release -o ../nupkg
+          dotnet nuget push ../nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
