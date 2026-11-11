@@ -16,10 +16,10 @@
 
   <!-- The server: the official MCP C# SDK, its core only (no hosting or ASP.NET). -->
   <ItemGroup>
-    <PackageVersion Include="ModelContextProtocol.Core" Version="2.3.0" />
+    <PackageVersion Include="ModelContextProtocol.Core" Version="2.4.0" />
     <!-- The library's extension points: dependency injection and logging abstractions only, at the SDK's version. -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
   <!-- Tests -->
