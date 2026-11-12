@@ -76,11 +76,37 @@ in a folder (see [A folder of packages](#a-folder-of-packages)):
 - Use full paths. On Windows, the command is `moca-mcp.exe`, and each `\` is
   written twice: `"C:\\Users\\you\\moca\\moca-mcp.exe"`.
 
-Other clients take the same command and arguments. For Claude Code:
+Other clients take the same command and arguments.
+
+**Claude Code**, in one line:
 
 ```sh
 claude mcp add acme-support -- /path/to/moca-mcp /path/to/acme-support.moca --trust-root /path/to/trust-root.json
 ```
+
+**VS Code**, with GitHub Copilot: in `.vscode/mcp.json`, or with **MCP: Add
+Server** from the Command Palette. Then use it from Copilot Chat in agent mode.
+
+```json
+{
+  "servers": {
+    "moca": {
+      "type": "stdio",
+      "command": "/path/to/moca-mcp",
+      "args": ["--library", "/path/to/packages",
+               "--trust-root", "/path/to/trust-root.json",
+               "--audience", "public"]
+    }
+  }
+}
+```
+
+**Cursor**: in `~/.cursor/mcp.json` for every project, or `.cursor/mcp.json`
+in one, with the same `mcpServers` entry as Claude Desktop.
+
+**JetBrains IDEs, Cline and any other MCP client** that runs local servers:
+add `moca-mcp` as a local (stdio) server, with the same command and
+arguments.
 
 Then ask: "Using acme-support, how long do customers have to ask for a
 refund? Cite the page."
