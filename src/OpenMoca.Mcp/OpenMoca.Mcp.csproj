@@ -10,7 +10,7 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>OpenMoca.Mcp</RootNamespace>
     <AssemblyName>moca-mcp</AssemblyName>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <InvariantGlobalization>true</InvariantGlobalization>
 
     <PackageId>OpenMoca.Mcp</PackageId>

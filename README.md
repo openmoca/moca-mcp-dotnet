@@ -128,7 +128,7 @@ moca-mcp --library ~/moca --trust-root ~/moca/trust-root.json
   question needs it, then kept in memory for the session.
 - **Ask about one package at a time.** The assistant lists the packages with
   `moca_list_packages`, then names the ones it wants in `moca_search`.
-- **Indexes are found by name.** `acme.moca.idx`, or `acme.<model>.moca.idx`,
+- **Indexes are found by name.** `acme.mocai`, or `acme.<model>.mocai`,
   beside `acme.moca` or the `acme` folder, is used for that package. Either can
   be a folder, or a Zip with `.zip` on the end, as downloaded.
 - **Versions are handled for you.** When a package supersedes another, both
@@ -156,7 +156,7 @@ moca-mcp models add bge-small-en-v1.5      # download once, checked against its 
 
 Models go in `~/.moca/models` (or `--models`, or `MOCA_MODELS`) and load the
 first time a search needs them. Build an index with the same model using
-`moca-index build <package> -o <package>.moca.idx --model bge-small-en-v1.5`
+`moca-index build <package> -o <package>.mocai --model bge-small-en-v1.5`
 and put it beside the package. A package whose model is not installed is
 still searched by words, and `moca_list_packages` names the model to add.
 

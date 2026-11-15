@@ -94,7 +94,7 @@ public sealed class CatalogueTests
             void Manifest(string dir, string id, string extra = "") =>
                 File.WriteAllText(Path.Combine(Directory.CreateDirectory(dir).FullName, "moca.json"), $$"""{ "id": "{{id}}", "version": "1.0.0", "title": "T"{{extra}} }""");
             Manifest(Path.Combine(root, "kb"), "https://e.x/kb");
-            File.WriteAllText(Path.Combine(root, "kb.moca.idx"), "");
+            File.WriteAllText(Path.Combine(root, "kb.mocai"), "");
             Manifest(Path.Combine(root, "deep", "a", "b", "c", "too-deep"), "https://e.x/deep");
             Manifest(Path.Combine(root, "new"), "https://e.x/new", """, "relations": [{ "type": "supersedes", "target": "https://e.x/kb", "version": "1.0.0" }]""");
             Manifest(Path.Combine(root, ".hidden"), "https://e.x/hidden");
@@ -104,15 +104,16 @@ public sealed class CatalogueTests
                 w.Write("""{ "id": "https://e.x/packed", "version": "2.0.0", "description": "D" }""");
             }
 
-            File.WriteAllText(Path.Combine(root, "packed.bge-small.moca.idx"), "");
-            File.WriteAllText(Path.Combine(root, "packed.all-minilm.moca.idx.zip"), "");
-            File.WriteAllText(Path.Combine(root, "packed.moca.idx.zip"), "");
+            File.WriteAllText(Path.Combine(root, "packed.bge-small.mocai"), "");
+            File.WriteAllText(Path.Combine(root, "packed.all-minilm.moca.idx.zip"), ""); // an earlier name: still found
+            File.WriteAllText(Path.Combine(root, "packed.mocai"), "");
+            File.WriteAllText(Path.Combine(root, "packed.moca.idx"), ""); // an earlier name, after the new one
             var log = new List<string>();
             var entries = Catalogue.Scan([root], 1000, 3, log.Add);
 
             Assert.Equal(["https://e.x/packed@2.0.0", "https://e.x/kb@1.0.0", "https://e.x/new@1.0.0"], entries.Select(e => e.Key));
-            Assert.EndsWith("kb.moca.idx", entries[1].Sidecar);
-            Assert.Equal(["packed.moca.idx.zip", "packed.all-minilm.moca.idx.zip", "packed.bge-small.moca.idx"], entries[0].Sidecars.Select(Path.GetFileName));
+            Assert.EndsWith("kb.mocai", entries[1].Sidecar);
+            Assert.Equal(["packed.mocai", "packed.moca.idx", "packed.all-minilm.moca.idx.zip", "packed.bge-small.mocai"], entries[0].Sidecars.Select(Path.GetFileName));
             Assert.Equal("D", entries[0].Description);
             Assert.True(entries[2].Replaces(entries[1]));
             Assert.False(entries[1].Replaces(entries[2]));

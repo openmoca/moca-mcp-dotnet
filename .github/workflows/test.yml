@@ -18,7 +18,8 @@ permissions:
 # The other MOCA repositories, at fixed refs: release tags, or commits before a release; never a branch
 # (moca-spec CONTRIBUTING.md).
 env:
-  MOCA_SPEC_REF: v0.6.0
+  MOCA_SPEC_REF: efab12511f05abc41aa4e401475543dcd666a533  # 0.7.0 release candidate; v0.7.0 once tagged
+  MOCA_READER_DOTNET_REF: 94f3e9daba8226a10605ab98bbecf1d502d8e96a  # 0.7.0 release candidate; v0.7.0 once tagged
 
 jobs:
   deps:
@@ -64,7 +65,16 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: moca-mcp-dotnet/global.json
-      - run: dotnet build moca-mcp-dotnet.slnx -c Release
+      # OpenMoca.Reader 0.7.0 is packed from moca-reader-dotnet at a pinned commit until it is on NuGet.
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/moca-reader-dotnet
+          ref: ${{ env.MOCA_READER_DOTNET_REF }}
+          path: moca-reader-dotnet
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - run: dotnet pack -c Release -o "$RUNNER_TEMP/feed"
+        working-directory: moca-reader-dotnet
+      - run: dotnet build moca-mcp-dotnet.slnx -c Release -p:RestoreAdditionalProjectSources="$RUNNER_TEMP/feed"
         working-directory: moca-mcp-dotnet
       # One standard model for the semantic tests, fetched by the server's own command (pinned commit and SHA-256).
       - uses: actions/cache@v4

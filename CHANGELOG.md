@@ -3,6 +3,20 @@
 All notable changes to moca-mcp for .NET (`OpenMoca.Mcp`). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-11-15
+
+### Changed
+
+- Built on the 0.7.0 .NET Reader (moca-spec 0.7.0): media descriptions,
+  alternates and refined time ranges in citation records, binding by
+  composition, and bounded work for compositions.
+- Sidecar indexes beside a package are found as `<name>.mocai` and
+  `<name>.<model>.mocai`, a Zip archive or a folder (package spec §12.1).
+  The earlier names, `.moca.idx` and `.moca.idx.zip`, are still found, after
+  the new one.
+- CI packs OpenMoca.Reader 0.7.0 from moca-reader-dotnet at a pinned commit
+  until it is on NuGet.
+
 ## [0.6.0] - 2026-11-11
 
 ### Added (Sigstore)
