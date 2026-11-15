@@ -6,6 +6,11 @@ name: Release
 # The builds are unsigned for now. macOS builds run on macOS, so the SDK gives each one the ad-hoc signature Apple
 # silicon needs to run it at all. When the signing certificates are in place, sign and notarise the macOS files and
 # sign the Windows files here, with the secrets held only in this workflow.
+#
+# Trusted publishing: nuget.org accepts this workflow, in the `release` environment, through a short-lived
+# OIDC token from GitHub Actions, and gives it an API key that lasts one hour. There is no NuGet API key in
+# this repository. NUGET_USER is the nuget.org profile name that owns the packages; it is not a credential.
+# Tag this repository only once the OpenMoca.Reader version it names is on NuGet.
 on:
   push:
     tags: ['v*']
@@ -57,8 +62,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -79,11 +86,18 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: moca-mcp-dotnet/global.json
-      - name: Pack and publish the .NET tool and the library
+      - name: Pack the .NET tool and the library
         working-directory: moca-mcp-dotnet
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           dotnet pack src/OpenMoca.Mcp.Server -c Release -o ../nupkg
           dotnet pack src/OpenMoca.Mcp -c Release -o ../nupkg
-          dotnet nuget push ../nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      # Ask for the key just before pushing: it lasts one hour.
+      - name: NuGet login (OIDC)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Publish the .NET tool and the library
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

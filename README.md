@@ -280,7 +280,9 @@ The tool and resource definitions are in `src/OpenMoca.Mcp/definitions.json`.
 
 Push a `vX.Y.Z` tag. The release workflow builds the six self-contained files,
 attaches them with their SHA-256 sums to a GitHub release, and publishes the
-`OpenMoca.Mcp` .NET tool and the `OpenMoca.Mcp.Server` library to NuGet.
+`OpenMoca.Mcp` .NET tool and the `OpenMoca.Mcp.Server` library to NuGet
+through trusted publishing; no NuGet API key is kept anywhere. Tag only once the
+`OpenMoca.Reader` version in `Directory.Packages.props` is on NuGet.
 
 ## Licence
 
