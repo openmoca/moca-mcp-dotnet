@@ -187,6 +187,33 @@ public sealed class ServerTests
         }
     }
 
+    [Fact]
+    public async Task A_neighbours_index_matched_by_name_is_passed_over_for_the_next()
+    {
+        // kb.aaa.mocai matches kb's <stem>.*.mocai pattern but is built for another package, so it fails the digest
+        // check; the server moves on to kb.zzz.mocai, which binds.
+        var root = Directory.CreateTempSubdirectory("moca-sidecars-").FullName;
+        try
+        {
+            CopyFolder(Spec("examples/support-kb"), Path.Combine(root, "kb"));
+            CopyFolder(Spec("examples/sidecars/support-kb.moca.idx"), Path.Combine(root, "kb.aaa.mocai"));
+            CopyFolder(Spec("examples/sidecars/support-kb.moca.idx"), Path.Combine(root, "kb.zzz.mocai"));
+            var neighbour = Path.Combine(root, "kb.aaa.mocai", "index.json");
+            var index = JsonNode.Parse(File.ReadAllText(neighbour))!;
+            index["target"]!["digest"] = "sha256:" + new string('0', 64);
+            File.WriteAllText(neighbour, index.ToJsonString());
+
+            await using var client = await StartAsync("--library", root, "--trust-root", Spec("fixtures/signing-keys/trust-root.json"));
+            await CallAsync(client, "moca_search", new() { ["query"] = "refund" }); // a package loads when a tool first uses it
+            var list = (await CallAsync(client, "moca_list_packages", [])).AsArray();
+            Assert.Equal("sidecar", (string?)list.Single()!["searchMode"]);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static void CopyFolder(string from, string to)
     {
         foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))

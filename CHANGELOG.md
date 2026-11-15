@@ -13,7 +13,8 @@ All notable changes to moca-mcp for .NET (`OpenMoca.Mcp`). The format follows
 - Sidecar indexes beside a package are found as `<name>.mocai` and
   `<name>.<model>.mocai`, a Zip archive or a folder (package spec §12.1).
   The earlier names, `.moca.idx` and `.moca.idx.zip`, are still found, after
-  the new one.
+  the new one. When several are beside a package, the server tries each until one binds, so another package's
+  index whose name matches is passed over.
 - CI packs OpenMoca.Reader 0.7.0 from moca-reader-dotnet at a pinned commit
   until it is on NuGet.
 

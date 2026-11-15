@@ -293,18 +293,23 @@ internal sealed class PackageSet
             return already;
         }
 
-        // Of the indexes beside the package, the one an installed model can search; else the first.
+        // Of the indexes beside the package, those an installed model can search first, then the rest, each in name
+        // order. The first that binds is used: a name pattern can also match a neighbour's index (a.b.mocai beside
+        // a.moca), which fails the digest check, so a failure moves on to the next candidate.
         var candidates = entry.Sidecars.Count > 0 ? entry.Sidecars : entry.Sidecar is null ? [] : [entry.Sidecar];
-        var sidecar = candidates.FirstOrDefault(c => SidecarModel.Read(c) is { } model
-            && Embedders.Any(e => DenseBackend.ModelMismatch(e, model, e.Dimensions) is null)) ?? candidates.FirstOrDefault();
+        var ordered = candidates.Select(c => (Path: c, Searchable: Searchable(c))).OrderBy(c => c.Searchable ? 0 : 1).Select(c => c.Path);
         SidecarBinding? binding = null;
-        if (sidecar is not null)
+        foreach (var sidecar in ordered)
         {
-            binding = SidecarBinder.Bind(sidecar, result);
-            if (!binding.Usable)
+            var attempt = SidecarBinder.Bind(sidecar, result);
+            if (attempt.Usable)
             {
-                _log($"ignoring sidecar {sidecar} for {entry.Location}: {string.Join(", ", binding.Diagnostics.Select(d => d.Code))}");
+                binding = attempt;
+                break;
             }
+
+            _log($"ignoring sidecar {sidecar} for {entry.Location}: {string.Join(", ", attempt.Diagnostics.Select(d => d.Code))}");
+            binding ??= attempt;
         }
 
         var before = Library.Packages.Select(p => p.Result.Digest!).ToHashSet(StringComparer.Ordinal);
@@ -327,6 +332,10 @@ internal sealed class PackageSet
         _log($"loaded {result.Id}@{result.Version} {result.Digest} [{string.Join(", ", result.Capabilities)}]");
         return loaded;
     }
+
+    // A sidecar whose model an installed embedder can search.
+    private bool Searchable(string sidecar) =>
+        SidecarModel.Read(sidecar) is { } model && Embedders.Any(e => DenseBackend.ModelMismatch(e, model, e.Dimensions) is null);
 
     private int LoadedPages() => _loaded.Values.Sum(l => l.Pages);
 
