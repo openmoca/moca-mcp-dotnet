@@ -11,13 +11,23 @@ name: Release
 # OIDC token from GitHub Actions, and gives it an API key that lasts one hour. There is no NuGet API key in
 # this repository. NUGET_USER is the nuget.org profile name that owns the packages; it is not a credential.
 # Tag this repository only once the OpenMoca.Reader version it names is on NuGet.
+#
+# On a pull request to main, two of the six files are built and both packages packed, with OpenMoca.Reader packed
+# from moca-reader-dotnet at the pinned commit until it is on NuGet, as the tests do. That proves the release path
+# before release day; nothing is released or published.
 on:
   push:
     tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # Used by the dry run only, until OpenMoca.Reader 0.7.0 is on NuGet. Move it with test.yml's pin.
+  MOCA_READER_DOTNET_REF: 76825889db1465ad8fd1a7f50c781275e941aed8  # 0.7.0 release candidate; v0.7.0 once tagged
 
 jobs:
   build:
@@ -25,25 +35,43 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        include:
-          - { rid: win-x64, os: ubuntu-latest }
-          - { rid: win-arm64, os: ubuntu-latest }
-          - { rid: linux-x64, os: ubuntu-latest }
-          - { rid: linux-arm64, os: ubuntu-latest }
-          - { rid: osx-x64, os: macos-latest }
-          - { rid: osx-arm64, os: macos-latest }
-    runs-on: ${{ matrix.os }}
+        # A pull request builds one file on each kind of runner; a tag builds all six.
+        rid: ${{ fromJSON(github.event_name == 'pull_request' && '["linux-x64","osx-arm64"]' || '["win-x64","win-arm64","linux-x64","linux-arm64","osx-x64","osx-arm64"]') }}
+    runs-on: ${{ startsWith(matrix.rid, 'osx') && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
         with:
           path: moca-mcp-dotnet
+          fetch-depth: 0
+      - name: The tag is on main and matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: moca-mcp-dotnet
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
+          for f in src/OpenMoca.Mcp/OpenMoca.Mcp.csproj src/OpenMoca.Mcp.Server/OpenMoca.Mcp.Server.csproj; do
+            version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$f")
+            [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "::error::$f is $version, the tag is $GITHUB_REF_NAME"; exit 1; }
+          done
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: moca-mcp-dotnet/global.json
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+        with:
+          repository: ${{ github.repository_owner }}/moca-reader-dotnet
+          ref: ${{ env.MOCA_READER_DOTNET_REF }}
+          path: moca-reader-dotnet
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - name: Pack OpenMoca.Reader from the pinned commit (dry run)
+        if: github.event_name == 'pull_request'
+        working-directory: moca-reader-dotnet
+        run: |
+          dotnet pack -c Release -o "$RUNNER_TEMP/feed"
+          echo "FEED=-p:RestoreAdditionalProjectSources=$RUNNER_TEMP/feed" >> "$GITHUB_ENV"
       - name: Publish
         working-directory: moca-mcp-dotnet
         run: >
-          dotnet publish src/OpenMoca.Mcp -c Release -r ${{ matrix.rid }} --self-contained
+          dotnet publish src/OpenMoca.Mcp -c Release -r ${{ matrix.rid }} --self-contained $FEED
           -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=none -p:AllowedReferenceRelatedFileExtensions=none
           -o ../out/${{ matrix.rid }}
@@ -56,6 +84,13 @@ jobs:
         with:
           name: moca-mcp-${{ matrix.rid }}
           path: out/moca-mcp-${{ matrix.rid }}.zip
+      - name: Pack the .NET tool and the library (dry run)
+        if: github.event_name == 'pull_request' && matrix.rid == 'linux-x64'
+        working-directory: moca-mcp-dotnet
+        run: |
+          dotnet pack src/OpenMoca.Mcp.Server -c Release -o ../nupkg $FEED
+          dotnet pack src/OpenMoca.Mcp -c Release -o ../nupkg $FEED
+          ls ../nupkg
 
   release:
     name: Release and publish
