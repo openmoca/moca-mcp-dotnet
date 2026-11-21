@@ -3248,6 +3248,13 @@
               "loaded": false
             },
             {
+              "id": "https://example.com/moca/rock-pools",
+              "version": "1.0.0",
+              "title": "A small guide to rock pools",
+              "description": "A short guide for anyone looking in rock pools for the first time: when to go, what to take, the words you will meet, and one morning's field notes.",
+              "loaded": false
+            },
+            {
               "id": "https://example.com/moca/service-catalogue",
               "version": "2.0.0",
               "title": "Service catalogue",
@@ -3806,6 +3813,13 @@
               ],
               "nodes": 1,
               "searchMode": "lexical"
+            },
+            {
+              "id": "https://example.com/moca/rock-pools",
+              "version": "1.0.0",
+              "title": "A small guide to rock pools",
+              "description": "A short guide for anyone looking in rock pools for the first time: when to go, what to take, the words you will meet, and one morning's field notes.",
+              "loaded": false
             },
             {
               "id": "https://example.com/moca/service-catalogue",
