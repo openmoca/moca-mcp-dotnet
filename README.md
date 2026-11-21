@@ -171,6 +171,9 @@ moca-mcp [package...] [--library folders...] [--trust-root file] [--audience pub
 | `<package>` | A package folder or `.moca` file, loaded at start. Write `package=index` to search through a sidecar index |
 | `--library <folders...>` | Folders of packages, loaded on first use |
 | `--trust-root <file>` | Verifies publisher and review attestations. Without it, nothing is reported as signed or reviewed, and no package can supersede or contest another |
+| `--require-signature` | Serve only packages with a valid package attestation under `--trust-root`. Recommended whenever you give a trust root: without it, an unsigned package, or one whose signature fails, is served too |
+| `--destination <where>` | Where the model that reads the answers runs, for the creator's terms: `provider` (a third party's model, the default), `host` (your own service) or `device` (the person's own device) |
+| `--conditions <list>` | Conditions the model's provider meets, for the creator's terms: `noTraining`, `noRetention` |
 | `--audience <list>` | The audiences served, such as `public`. The assistant cannot widen it. Pages with no audience label are left out |
 | `--allow-unlabelled` | With `--audience`, also serve pages that have no audience label |
 | `--include-excluded` | Also serve out-of-force, superseded and deprecated content, flagged as such |
@@ -182,7 +185,8 @@ moca-mcp [package...] [--library folders...] [--trust-root file] [--audience pub
 | `--max-packages <n>` | Most packages a library lists (default 1,000) |
 | `--max-depth <n>` | How deep to look in a library folder (default 3) |
 | `--models <folder>` | Where the standard embedding models are installed (default `~/.moca/models`) |
-| `--max-loaded-pages <n>` | Memory budget: pages kept loaded at once (default 25,000, about 750 MB). The least recently used package is unloaded beyond it |
+| `--max-loaded-mb <n>` | Memory budget in megabytes (default 1,000). Each loaded package counts its files plus about 30 KB a page. The least recently used package is unloaded beyond it, and a call loads no more packages than fit, apart from the first it needs |
+| `--max-loaded-pages <n>` | Memory budget in pages kept loaded at once (default 25,000), beside `--max-loaded-mb` |
 
 Invalid packages are skipped and reported on standard error;
 `moca_list_packages` says why.
@@ -193,15 +197,37 @@ Invalid packages are skipped and reported on standard error;
 | --- | --- |
 | `moca_list_packages` | Every package the server can serve, loaded or not: id, version, title, description; for a loaded package its digest, signature, capabilities, page count and search mode |
 | `moca_search` | Citation records, compact by default; `detail: "full"` for whole records. `packages` limits it to some packages; `mode` is `lexical`, `semantic` or `hybrid`. Out-of-force, superseded and deprecated content is left out unless the host starts the server with `--include-excluded`: the assistant cannot ask for it |
-| `moca_structure` | Structure answers: `concept`, `requires`, `required_by`, `parts`, `narrower`, `broader`, `related`, `sequence` or `nodes`, each naming its layer |
-| `moca_get_node` | One citation record with the page's full text |
-| `moca_package_info` | One package's manifest, digest, signers, attestations, members, profiles and the Reader's findings: why it is, or is not, trusted |
+| `moca_structure` | Structure answers: `concept`, `requires`, `required_by`, `parts`, `narrower`, `broader`, `related`, `sequence` or `nodes`, each naming its layer. `nodes` gives 20 at a time (`limit` up to 100) and `nextOffset` when there are more |
+| `moca_get_node` | One citation record with the page's full text. An id without a version (`<package id>#<path>`) gives the newest loaded version that may be served, and names the others in `otherVersions`; a ref (`<package id>@<version>#<path>`) gives that version |
+| `moca_package_info` | One package's manifest, digest, signers, attestations, members, profiles, the creator's terms and the Reader's findings: why it is, or is not, trusted |
 
 Every tool is marked read-only, and no tool takes a file path: the assistant
 can only choose among the packages you serve. Input is bounded and checked
 before anything runs. Every page of a loaded package is also a resource at
-`moca://node/<URL-encoded versioned reference>`. The audience filter and the
-default retrieval policy apply to tools and resources alike.
+`moca://node/<URL-encoded versioned reference>`, listed 100 at a time. The
+audience filter, the default retrieval policy and the creator's terms apply to
+tools and resources alike.
+
+Answers are bounded: a text longer than 100,000 bytes is cut and its record
+marked `truncated`, and an answer stops adding records past 400,000 bytes,
+saying `truncated`.
+
+### The creator's terms
+
+A package's manifest can say how its creator lets AI use the work, for
+example "no third party's model" or "no training"
+([package spec §4.14](https://github.com/openmoca/moca-spec/blob/main/spec/moca-package-spec.md#414-terms)).
+The server applies those terms to everything it returns
+([Reader contract §15.4](https://github.com/openmoca/moca-spec/blob/main/spec/moca-reader-contract.md#154-the-terms-gate)):
+search results, nodes, the nodes bound to a concept, and resources. An MCP
+client is a model, so by default the server treats it as a third party's
+model with no conditions, and leaves out what the creator does not allow
+there. Say where your model runs with `--destination`: `device` when it runs
+on the person's own device, `host` when it is your own service. A search that
+left results out says so in `termsNote`.
+
+Terms are the creator's labels, not locks: the server applies them, and the
+model you connect has its own terms for what it does with the text.
 
 Package text is returned as data inside citation records. Tool descriptions
 tell the model to quote and cite it, not follow it
@@ -283,6 +309,17 @@ attaches them with their SHA-256 sums to a GitHub release, and publishes the
 `OpenMoca.Mcp` .NET tool and the `OpenMoca.Mcp.Server` library to NuGet
 through trusted publishing; no NuGet API key is kept anywhere. Tag only once the
 `OpenMoca.Reader` version in `Directory.Packages.props` is on NuGet.
+
+## Standards
+
+| Standard | Where | How strongly |
+| --- | --- | --- |
+| [Model Context Protocol](https://modelcontextprotocol.io/specification/2025-06-18) 2025-06-18 | the server, over stdio | follow (one revision behind the latest, 2026-07-28) |
+| [JSON Schema](https://json-schema.org/) | tool input schemas, checked before anything runs | follow |
+| MOCA ([moca-spec](https://github.com/openmoca/moca-spec)) 0.7 | reading, verifying, searching and citing packages, through OpenMoca.Reader | follow |
+| [ONNX](https://onnx.ai/) via ONNX Runtime | search by meaning with the standard models | follow |
+
+Built with the help of AI assistants; every change is reviewed and accepted by the maintainer.
 
 ## Licence
 
