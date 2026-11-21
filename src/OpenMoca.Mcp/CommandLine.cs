@@ -26,6 +26,8 @@ internal sealed record CommandLine
           --preload                  load packages when the server starts, not on first use
           --max-packages <n>         most packages a library may list (default 1000)
           --max-depth <n>            how deep to look in a library folder (default 3)
+          --max-loaded-mb <n>        memory budget, in megabytes kept loaded at once (default 1000): each
+                                     package counts its files plus about 30 KB a page
           --max-loaded-pages <n>     memory budget, in pages kept loaded at once (default 25000)
 
         Search by meaning:
@@ -35,8 +37,14 @@ internal sealed record CommandLine
           moca-mcp models list                 the standard models, and which are installed
           moca-mcp models add <model...>       download and check standard models (the only command that downloads)
 
+        The creator's terms (applied to everything the server returns):
+          --destination <where>      where the model that reads the answers runs: provider (a third party's model,
+                                     the default), host (your own service) or device (the person's own device)
+          --conditions <list>        comma-separated conditions the provider meets: noTraining, noRetention
+
         Options:
           --trust-root <file>        trust root for verifying package and review attestations
+          --require-signature        serve only packages with a valid package attestation under --trust-root
           --members <dirs...>        directories to search for member packages
           --audience <list>          comma-separated audiences this host may serve (default: no filter); content with
                                      no audience label is left out unless --allow-unlabelled is given
@@ -83,6 +91,18 @@ internal sealed record CommandLine
 
     public int MaxLoadedPages { get; init; } = 25_000;
 
+    /// <summary><c>--max-loaded-mb</c>: the memory budget in bytes.</summary>
+    public long MaxLoadedBytes { get; init; } = 1_000_000_000;
+
+    /// <summary><c>--destination</c>: where the model that reads the answers runs (Reader contract §15.4).</summary>
+    public string Destination { get; init; } = OpenMoca.Reader.Search.TermsDestinations.Provider;
+
+    /// <summary><c>--conditions</c>: the conditions the provider meets.</summary>
+    public IReadOnlyList<string> Conditions { get; init; } = [];
+
+    /// <summary><c>--require-signature</c>: serve only signed packages.</summary>
+    public bool RequireSignature { get; init; }
+
     /// <summary>The model store; <c>MOCA_MODELS</c>, else <c>~/.moca/models</c>.</summary>
     public string Models { get; init; } = DefaultModels;
 
@@ -100,8 +120,11 @@ internal sealed record CommandLine
         var members = new List<string>();
         var overlays = new List<OverlayEntry>();
         var library = new List<string>();
-        bool watch = false, preload = false, allowUnlabelled = false, includeExcluded = false, allowUnsignedRelations = false;
+        bool watch = false, preload = false, allowUnlabelled = false, includeExcluded = false, allowUnsignedRelations = false, requireSignature = false;
         int maxPackages = 1000, maxDepth = 3, maxLoadedPages = 25_000;
+        long maxLoadedBytes = 1_000_000_000;
+        var destination = OpenMoca.Reader.Search.TermsDestinations.Provider;
+        List<string> conditions = [];
         var models = DefaultModels;
         string? trustRoot = null;
         List<string>? audiences = null;
@@ -161,6 +184,32 @@ internal sealed record CommandLine
                     maxLoadedPages = Number(Value(args, ref i, arg), arg);
                     collecting = null;
                     continue;
+                case "--max-loaded-mb":
+                    maxLoadedBytes = Number(Value(args, ref i, arg), arg) * 1_000_000L;
+                    collecting = null;
+                    continue;
+                case "--require-signature":
+                    requireSignature = true;
+                    collecting = null;
+                    continue;
+                case "--destination":
+                    destination = Value(args, ref i, arg);
+                    if (destination is not ("provider" or "host" or "device"))
+                    {
+                        throw new ArgumentException($"--destination must be provider, host or device, not \"{destination}\"");
+                    }
+
+                    collecting = null;
+                    continue;
+                case "--conditions":
+                    conditions = [.. Value(args, ref i, arg).Split(',').Select(c => c.Trim()).Where(c => c.Length > 0)];
+                    if (conditions.FirstOrDefault(c => c is not ("noTraining" or "noRetention")) is { } unknown)
+                    {
+                        throw new ArgumentException($"--conditions takes noTraining and noRetention, not \"{unknown}\"");
+                    }
+
+                    collecting = null;
+                    continue;
                 case "--members" or "--overlay" or "--library":
                     collecting = arg;
                     if (i + 1 >= args.Count || args[i + 1].StartsWith('-'))
@@ -207,6 +256,11 @@ internal sealed record CommandLine
             throw new ArgumentException("--watch needs a --library folder");
         }
 
+        if (requireSignature && trustRoot is null)
+        {
+            throw new ArgumentException("--require-signature needs a --trust-root");
+        }
+
         return new CommandLine
         {
             Packages = packages,
@@ -223,6 +277,10 @@ internal sealed record CommandLine
             MaxPackages = maxPackages,
             MaxDepth = maxDepth,
             MaxLoadedPages = maxLoadedPages,
+            MaxLoadedBytes = maxLoadedBytes,
+            Destination = destination,
+            Conditions = conditions,
+            RequireSignature = requireSignature,
             Models = models,
         };
     }

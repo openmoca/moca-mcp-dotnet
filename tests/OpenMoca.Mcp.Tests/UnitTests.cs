@@ -31,9 +31,23 @@ public sealed class CommandLineTests
     }
 
     [Fact]
+    public void Reads_terms_signature_and_byte_budget_options()
+    {
+        var c = CommandLine.Parse(["kb", "--trust-root", "t.json", "--require-signature", "--destination", "device", "--conditions", "noTraining, noRetention", "--max-loaded-mb", "64"]);
+        var defaults = CommandLine.Parse(["kb"]);
+
+        Assert.True(c.RequireSignature);
+        Assert.Equal("device", c.Destination);
+        Assert.Equal(["noTraining", "noRetention"], c.Conditions);
+        Assert.Equal(64_000_000, c.MaxLoadedBytes);
+        Assert.Equal(("provider", false), (defaults.Destination, defaults.RequireSignature));
+    }
+
+    [Fact]
     public void No_audience_means_no_filter() => Assert.Null(CommandLine.Parse(["kb"]).Audiences);
 
-    public static TheoryData<string> BadArguments => new() { "", "kb --trust-root", "kb --overlay team=x.ttl", "kb --embedder e.mjs", "kb --nope", "kb --watch", "--library lib --max-depth 0", "--library lib --max-loaded-pages lots" };
+    public static TheoryData<string> BadArguments => new() { "", "kb --trust-root", "kb --overlay team=x.ttl", "kb --embedder e.mjs", "kb --nope", "kb --watch", "--library lib --max-depth 0", "--library lib --max-loaded-pages lots",
+        "kb --require-signature", "kb --destination cloud", "kb --conditions noSharing", "kb --max-loaded-mb 0" };
 
     [Theory]
     [MemberData(nameof(BadArguments))]
@@ -126,4 +140,29 @@ public sealed class CatalogueTests
             Directory.Delete(root, recursive: true);
         }
     }
+}
+
+public sealed class BoundsTests
+{
+    [Theory]
+    [InlineData("abcdef", 4, "abcd", true)]
+    [InlineData("abc", 4, "abc", false)]
+    [InlineData("a\u00e9b", 2, "a", true)]
+    [InlineData("a\U0001F600b", 4, "a", true)]
+    [InlineData("a\U0001F600b", 5, "a\U0001F600", true)]
+    public void Text_is_cut_at_a_character_boundary(string text, int max, string expected, bool cut)
+    {
+        Assert.Equal(expected, MocaServer.Cut(text, max, out var wasCut));
+        Assert.Equal(cut, wasCut);
+    }
+
+    [Theory]
+    [InlineData("2.0.0", "1.10.0")]
+    [InlineData("1.10.0", "1.9.0")]
+    [InlineData("1.0.0", "1.0.0-rc.1")]
+    [InlineData("1.0.0-rc.10", "1.0.0-rc.2")]
+    [InlineData("1.0.0-beta", "1.0.0-alpha")]
+    [InlineData("0.0.1", "not-semver")]
+    public void Versions_order_by_semver_precedence(string newer, string older) =>
+        Assert.True(VersionOrder.Instance.Compare(newer, older) > 0);
 }

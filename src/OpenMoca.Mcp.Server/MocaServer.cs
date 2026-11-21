@@ -22,6 +22,9 @@ internal static class MocaServer
 {
     public const string NodeUri = "moca://node/";
 
+    /// <summary>Resources listed per page (resources/list); the client asks for the next with the cursor it is given.</summary>
+    internal const int ResourcePage = 100;
+
     private static readonly JsonSerializerOptions Output = new()
     {
         WriteIndented = true,
@@ -46,6 +49,10 @@ internal static class MocaServer
             record is not null
             && Audience.Allowed(record, audiences, options.AllowUnlabelled)
             && (options.IncludeExcluded || OpenMoca.Reader.Citations.Citations.PassesDefaultPolicy(record));
+
+        // Reader contract §15.4: the creator's terms apply to everything handed to the client, a model.
+        IReadOnlyList<CitationRecord> Permitted(IEnumerable<CitationRecord> records) =>
+            new MocaSearch(set.Library, set.Backend, audiences) { AllowUnlabelled = options.AllowUnlabelled }.ApplyTerms(records, options.Terms);
 
         return new McpServerOptions
         {
@@ -74,27 +81,34 @@ internal static class MocaServer
                     {
                         "moca_list_packages" => Text(ListPackages(set)),
                         "moca_search" => Text(await SearchAsync(set, options, args, cancellationToken).ConfigureAwait(false)),
-                        "moca_structure" => Text(await StructureOfAsync(set, args, Allowed, cancellationToken).ConfigureAwait(false)),
-                        "moca_get_node" => await GetNodeAsync(set, args, Allowed, cancellationToken).ConfigureAwait(false),
+                        "moca_structure" => Text(await StructureOfAsync(set, options, args, Allowed, Permitted, cancellationToken).ConfigureAwait(false)),
+                        "moca_get_node" => await GetNodeAsync(set, options, args, Allowed, Permitted, cancellationToken).ConfigureAwait(false),
                         "moca_package_info" => await PackageInfoAsync(set, args, cancellationToken).ConfigureAwait(false),
                         _ => throw new McpProtocolException($"Tool {call.Name} not found", McpErrorCode.InvalidParams),
                     }, cancellationToken).ConfigureAwait(false);
                 },
                 ListResourceTemplatesHandler = (_, _) =>
                     ValueTask.FromResult(new ListResourceTemplatesResult { ResourceTemplates = [.. Definitions.Value.Templates] }),
-                // The pages of the loaded packages; a package loads when a tool first uses it, or with --preload.
-                ListResourcesHandler = async (_, cancellationToken) => await set.RunAsync(() => Task.FromResult(new ListResourcesResult
+                // The pages of the loaded packages, a page of them at a time; a package loads when a tool first uses it,
+                // or with --preload.
+                ListResourcesHandler = async (request, cancellationToken) => await set.RunAsync(() =>
                 {
-                    Resources = [.. set.Library.Citations().Where(Allowed).Select(r => new Resource
+                    var from = int.TryParse(request.Params?.Cursor, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var c) ? c : 0;
+                    var all = Permitted(set.Library.Citations(includeText: false).Where(Allowed));
+                    return Task.FromResult(new ListResourcesResult
                     {
-                        Uri = NodeUri + EncodeUriComponent(r.Node.Ref),
-                        Name = r.Node.Ref,
-                        Title = r.Node.Title,
-                        // A node without a description takes the template's, so every listed resource has one.
-                        Description = r.Node.Description ?? Definitions.Value.Templates[0].Description,
-                        MimeType = "text/markdown",
-                    })],
-                }), cancellationToken).ConfigureAwait(false),
+                        Resources = [.. all.Skip(from).Take(ResourcePage).Select(r => new Resource
+                        {
+                            Uri = NodeUri + EncodeUriComponent(r.Node.Ref),
+                            Name = r.Node.Ref,
+                            Title = r.Node.Title,
+                            // A node without a description takes the template's, so every listed resource has one.
+                            Description = r.Node.Description ?? Definitions.Value.Templates[0].Description,
+                            MimeType = "text/markdown",
+                        })],
+                        NextCursor = from + ResourcePage < all.Count ? (from + ResourcePage).ToString(System.Globalization.CultureInfo.InvariantCulture) : null,
+                    });
+                }, cancellationToken).ConfigureAwait(false),
                 ReadResourceHandler = async (request, cancellationToken) =>
                 {
                     var uri = request.Params!.Uri;
@@ -107,14 +121,20 @@ internal static class MocaServer
                             return set.Library.Get(nodeRef);
                         }, cancellationToken).ConfigureAwait(false)
                         : null;
-                    if (record is null || !Allowed(record))
+                    record = record is not null && Allowed(record) ? await set.RunAsync(() => Task.FromResult(Permitted([record]).FirstOrDefault()), cancellationToken).ConfigureAwait(false) : null;
+                    if (record is null)
                     {
                         throw new McpProtocolException($"no node {nodeRef}", McpErrorCode.InvalidParams);
                     }
 
+                    var text = Cut(record.Text ?? "", options.MaxTextBytes, out var cut);
                     return new ReadResourceResult
                     {
-                        Contents = [new TextResourceContents { Uri = uri, MimeType = "text/markdown", Text = record.Text ?? "" }],
+                        Contents = [new TextResourceContents
+                        {
+                            Uri = uri, MimeType = "text/markdown", Text = text,
+                            Meta = cut ? new JsonObject { ["truncated"] = true } : null,
+                        }],
                     };
                 },
             },
@@ -179,14 +199,16 @@ internal static class MocaServer
             IncludeAll = mcp.IncludeExcluded,
             Concepts = Strings(args, "concepts"),
             Scope = String(args, "scope"),
+            // Reader contract §15.4: the creator's terms, for the model this server hands records to.
+            Terms = mcp.Terms,
         };
         var records = await search.SearchAsync(query, options, cancellationToken).ConfigureAwait(false);
-        var full = String(args, "detail") == "full";
         var result = new JsonObject
         {
             ["query"] = query,
-            ["results"] = new JsonArray([.. records.Select(r => full ? CitationJson.ToJson(r) : Compact(r))]),
+            ["results"] = Bounded(records, String(args, "detail") == "full", mcp, out var truncated),
         };
+        AddBoundNotes(result, truncated, search.Diagnostics.Any(d => d.Code == OpenMoca.Reader.Diagnostics.DiagnosticCodes.U004TermsExcluded), mcp);
         if (mode != "lexical" || String(args, "mode") is not null)
         {
             result["mode"] = mode;
@@ -258,6 +280,86 @@ internal static class MocaServer
         package["semantic"] = semantic;
     }
 
+    // What a call left out on purpose, said in the answer so the model can act on it.
+    private static void AddBoundNotes(JsonObject result, bool truncated, bool termsExcluded, MocaMcpOptions mcp)
+    {
+        if (truncated)
+        {
+            result["truncated"] = true;
+        }
+
+        if (termsExcluded)
+        {
+            result["termsNote"] = $"Some results were left out: their creators' terms do not allow them to be sent to {Destination(mcp)}.";
+        }
+    }
+
+    private static string Destination(MocaMcpOptions mcp) => mcp.Terms.Ai?.Destination switch
+    {
+        TermsDestinations.Device => "a model on the person's own device",
+        TermsDestinations.Host => "this host's own model",
+        _ => "a third party's model",
+    };
+
+    /// <summary>
+    /// Records as the answer carries them, within the host's bounds: each text cut to <see cref="MocaMcpOptions.MaxTextBytes"/>
+    /// (the record marked <c>truncated</c>), and records left out once the answer passes
+    /// <see cref="MocaMcpOptions.MaxResponseBytes"/>, always keeping the first.
+    /// </summary>
+    internal static JsonArray Bounded(IEnumerable<CitationRecord> records, bool full, MocaMcpOptions mcp, out bool truncated)
+    {
+        truncated = false;
+        var output = new JsonArray();
+        long size = 0;
+        foreach (var r in records)
+        {
+            var record = r.Text is { } text && Cut(text, mcp.MaxTextBytes, out var cut) is var shorter && cut ? r with { Text = shorter } : r;
+            var json = full ? CitationJson.ToJson(record) : Compact(record);
+            if (!ReferenceEquals(record, r))
+            {
+                json["truncated"] = true;
+            }
+
+            size += Encoding.UTF8.GetByteCount(json.ToJsonString());
+            if (output.Count > 0 && size > mcp.MaxResponseBytes)
+            {
+                truncated = true;
+                break;
+            }
+
+            output.Add(json);
+        }
+
+        return output;
+    }
+
+    /// <summary>Text cut to at most <paramref name="maxBytes"/> of UTF-8, at a character boundary.</summary>
+    internal static string Cut(string text, int maxBytes, out bool cut)
+    {
+        cut = Encoding.UTF8.GetByteCount(text) > maxBytes;
+        if (!cut)
+        {
+            return text;
+        }
+
+        var bytes = 0;
+        var end = 0;
+        while (end < text.Length)
+        {
+            var step = char.IsHighSurrogate(text[end]) && end + 1 < text.Length && char.IsLowSurrogate(text[end + 1]) ? 2 : 1;
+            var width = Encoding.UTF8.GetByteCount(text.AsSpan(end, step));
+            if (bytes + width > maxBytes)
+            {
+                break;
+            }
+
+            bytes += width;
+            end += step;
+        }
+
+        return text[..end];
+    }
+
     // What a call could not cover, said in the answer so the model can act on it.
     private static void AddSelectionNotes(JsonObject result, Selection selection)
     {
@@ -269,17 +371,40 @@ internal static class MocaServer
         if (selection.NotLoaded.Count > 0)
         {
             result["notSearched"] = new JsonArray([.. selection.NotLoaded.Select(u => (JsonNode)u)]);
-            result["note"] = "Some packages were not searched: the server's memory budget is full. Name the packages to search with the packages argument.";
+            result["note"] = "Some packages were not searched: the server's memory budget is full. Name fewer packages with the packages argument, or ask again for the ones not searched.";
         }
     }
 
-    private static async Task<JsonObject> StructureOfAsync(PackageSet set, Dictionary<string, JsonElement> args, Func<CitationRecord, bool> allowed, CancellationToken cancellationToken)
+    /// <summary>The most nodes one <c>nodes</c> answer gives, and the default.</summary>
+    internal const int MaxNodes = 100;
+
+    private const int DefaultNodes = 20;
+
+    private static async Task<JsonObject> StructureOfAsync(PackageSet set, MocaMcpOptions mcp, Dictionary<string, JsonElement> args, Func<CitationRecord, bool> allowed,
+        Func<IEnumerable<CitationRecord>, IReadOnlyList<CitationRecord>> permitted, CancellationToken cancellationToken)
     {
         var selection = await set.SelectAsync(Strings(args, "packages"), cancellationToken).ConfigureAwait(false);
         var op = args["op"].GetString()!;
         var iri = args["iri"].GetString()!;
         var transitive = Bool(args, "transitive") ?? false;
         var s = set.Library.Structure;
+        var bound = false;
+        int? next = null;
+        JsonNode? Nodes()
+        {
+            // Reader contract §15.4: only what the creator's terms allow; a page at a time.
+            var all = permitted(s.Nodes(iri, String(args, "include") ?? "none").Where(r => allowed(r) && selection.Digests.Contains(r.Package.Digest)));
+            var offset = Int(args, "offset") ?? 0;
+            var page = all.Skip(offset).Take(Math.Clamp(Int(args, "limit") ?? DefaultNodes, 1, MaxNodes)).ToList();
+            var output = Bounded(page, String(args, "detail") == "full", mcp, out bound);
+            if (offset + output.Count < all.Count)
+            {
+                next = offset + output.Count;
+            }
+
+            return output;
+        }
+
         JsonNode? answer = op switch
         {
             "concept" => StructureJson.Concept(s.Concept(iri)),
@@ -290,27 +415,54 @@ internal static class MocaServer
             "broader" => StructureJson.Items(s.Broader(iri)),
             "related" => StructureJson.Items(s.Related(iri)),
             "sequence" => s.Sequence(iri) is { } sequence ? StructureJson.Items(sequence) : null,
-            "nodes" => new JsonArray([.. s.Nodes(iri, String(args, "include") ?? "none")
-                .Where(r => allowed(r) && selection.Digests.Contains(r.Package.Digest))
-                .Select(r => String(args, "detail") == "full" ? CitationJson.ToJson(r) : Compact(r))]),
+            "nodes" => Nodes(),
             _ => throw new McpProtocolException($"unknown operation {op}", McpErrorCode.InvalidParams),
         };
         var result = new JsonObject { ["op"] = op, ["iri"] = iri, ["result"] = answer };
+        if (next is { } n)
+        {
+            result["nextOffset"] = n;
+        }
+
+        if (bound)
+        {
+            result["truncated"] = true;
+        }
+
         AddSelectionNotes(result, selection);
         return result;
     }
 
-    private static async Task<CallToolResult> GetNodeAsync(PackageSet set, Dictionary<string, JsonElement> args, Func<CitationRecord, bool> allowed, CancellationToken cancellationToken)
+    private static async Task<CallToolResult> GetNodeAsync(PackageSet set, MocaMcpOptions mcp, Dictionary<string, JsonElement> args, Func<CitationRecord, bool> allowed,
+        Func<IEnumerable<CitationRecord>, IReadOnlyList<CitationRecord>> permitted, CancellationToken cancellationToken)
     {
         var nodeId = args["node_id"].GetString()!;
-        await set.SelectAsync([PackageOf(nodeId)], cancellationToken).ConfigureAwait(false);
-        var record = set.Library.Get(nodeId, String(args, "locale"));
-        if (record is null || !allowed(record))
+        var locale = String(args, "locale");
+        var package = PackageOf(nodeId);
+        await set.SelectAsync([package], cancellationToken).ConfigureAwait(false);
+        var hash = nodeId.LastIndexOf('#');
+        // An id without a version (id#path) means the newest loaded version that may be served; a ref
+        // (id@version#path) means that version.
+        var versions = hash < 0 || package.Contains('@', StringComparison.Ordinal)
+            ? [set.Library.Get(nodeId, locale)]
+            : set.Library.Packages.Where(p => p.Result.Id == package)
+                .Select(p => set.Library.Get($"{package}@{p.Result.Version}{nodeId[hash..]}", locale))
+                .ToList();
+        var found = versions.OfType<CitationRecord>().Where(allowed).ToList();
+        var served = permitted(found).OrderByDescending(r => r.Package.Version, VersionOrder.Instance).ToList();
+        if (served.Count == 0)
         {
-            return Error(new JsonObject { ["error"] = $"no node {nodeId}" });
+            var why = found.Count > 0 ? $"; its creator's terms do not allow it to be sent to {Destination(mcp)}" : "";
+            return Error(new JsonObject { ["error"] = $"no node {nodeId}{why}" });
         }
 
-        return Text(CitationJson.ToJson(record));
+        var json = Bounded([served[0]], full: true, mcp, out _)[0]!.AsObject();
+        if (served.Count > 1)
+        {
+            json["otherVersions"] = new JsonArray([.. served.Skip(1).Select(r => (JsonNode)r.Node.Ref)]);
+        }
+
+        return Text(json);
     }
 
     private static async Task<CallToolResult> PackageInfoAsync(PackageSet set, Dictionary<string, JsonElement> args, CancellationToken cancellationToken)
@@ -357,6 +509,8 @@ internal static class MocaServer
                 ["status"] = m.Status,
             })]),
             ["searchMode"] = set.HasChunks(entry.Key) ? "sidecar" : "lexical",
+            // Reader contract §15.1: the creator's terms as written, their problems and who stated them.
+            ["terms"] = result.Terms is { } terms ? JsonSerializer.SerializeToNode(terms, CitationJson.Options) : null,
             ["findings"] = new JsonArray([.. result.Diagnostics.Select(d => JsonSerializer.SerializeToNode(d, CitationJson.Options))]),
         };
         AddSemantic(info, set, result.Digest!);

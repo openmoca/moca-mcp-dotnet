@@ -34,9 +34,43 @@ public sealed record MocaMcpOptions
     /// packages.</summary>
     public IReadOnlyList<string> MemberFolders { get; init; } = [];
 
+    /// <summary>
+    /// The creator's terms applied to everything the server hands a client (Reader contract §15.4): search results,
+    /// nodes, the nodes bound to a concept, and resources. A client of an MCP server is a model, by default a third
+    /// party's, so the default is <see cref="TermsRequest.Provider"/>. Set the destination to <c>device</c> when the
+    /// model runs on the person's own device, or <c>host</c> when it is your own service, and list the conditions
+    /// (<c>noTraining</c>, <c>noRetention</c>) the model's provider meets.
+    /// </summary>
+    public TermsRequest Terms { get; init; } = TermsRequest.Provider;
+
+    /// <summary>
+    /// Attestations §8: serve only packages with a valid package attestation under <see cref="TrustRoot"/>. A package
+    /// without one, or whose signature fails, is not loaded (A009).
+    /// </summary>
+    public bool RequireSignature { get; init; }
+
     /// <summary>The memory budget, in pages kept loaded at once; the least recently used package is unloaded beyond
     /// it. A package that supersedes a loaded one always loads.</summary>
     public int MaxLoadedPages { get; init; } = 25_000;
+
+    /// <summary>
+    /// The memory budget in bytes, beside <see cref="MaxLoadedPages"/>. A loaded package counts the bytes of its files
+    /// plus about 30 KB a page for what the Reader builds from them (bench/README.md). Beyond it the least recently used
+    /// package is unloaded, and a call loads no more packages than fit, apart from the first it needs.
+    /// </summary>
+    public long MaxLoadedBytes { get; init; } = 1_000_000_000;
+
+    /// <summary>
+    /// The most bytes of text (UTF-8) one record carries: a longer text is cut at a character boundary and the record
+    /// is marked <c>truncated</c>.
+    /// </summary>
+    public int MaxTextBytes { get; init; } = 100_000;
+
+    /// <summary>
+    /// The most bytes of records one answer carries: records past it are left out, and the answer says so with
+    /// <c>truncated</c>. At least one record is always returned.
+    /// </summary>
+    public int MaxResponseBytes { get; init; } = 400_000;
 
     /// <summary>Load every package when the server starts, within the budget, rather than on first use.</summary>
     public bool Preload { get; init; }
