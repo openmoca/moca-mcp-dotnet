@@ -46,6 +46,22 @@ Signing is planned.
 Each release lists the SHA-256 of every file, so you can check what you
 downloaded.
 
+### Check a download came from this repository
+
+Each zip, and the `moca-mcp` program inside it, has a build provenance
+attestation: a signed record that this repository's release workflow built
+it from the tagged source. With the [GitHub CLI](https://cli.github.com/),
+check the zip you downloaded:
+
+```sh
+gh attestation verify moca-mcp-osx-arm64.zip --repo openmoca/moca-mcp-dotnet \
+  --signer-workflow openmoca/moca-mcp-dotnet/.github/workflows/release.yml
+```
+
+Use the name of your file. The same command works on the program itself
+(`moca-mcp` or `moca-mcp.exe`). It prints the workflow and commit the file
+came from, and fails if the file is not one this workflow built.
+
 ## Connect a package
 
 **Claude Desktop** keeps its servers in `claude_desktop_config.json`. To open
@@ -305,7 +321,8 @@ The tool and resource definitions are in `src/OpenMoca.Mcp/definitions.json`.
 ## Release
 
 Push a `vX.Y.Z` tag. The release workflow builds the six self-contained files,
-attaches them with their SHA-256 sums to a GitHub release, and publishes the
+attests their build provenance, attaches them with their SHA-256 sums to a
+GitHub release, and publishes the
 `OpenMoca.Mcp` .NET tool and the `OpenMoca.Mcp.Server` library to NuGet
 through trusted publishing; no NuGet API key is kept anywhere. Tag only once the
 `OpenMoca.Reader` version in `Directory.Packages.props` is on NuGet.
@@ -318,6 +335,7 @@ through trusted publishing; no NuGet API key is kept anywhere. Tag only once the
 | [JSON Schema](https://json-schema.org/) | tool input schemas, checked before anything runs | follow |
 | MOCA ([moca-spec](https://github.com/openmoca/moca-spec)) 0.7 | reading, verifying, searching and citing packages, through OpenMoca.Reader | follow |
 | [ONNX](https://onnx.ai/) via ONNX Runtime | search by meaning with the standard models | follow |
+| [SLSA provenance](https://slsa.dev/spec/v1.0/provenance) v1, in an [in-toto](https://github.com/in-toto/attestation) statement signed with [Sigstore](https://www.sigstore.dev/) | the release files (GitHub artifact attestations) | follow |
 
 Built with the help of AI assistants; every change is reviewed and accepted by the maintainer.
 
