@@ -23,6 +23,7 @@ internal sealed class PackageSet
     private readonly ReadOptions _read;
     private readonly IPackageSource _source;
     private readonly int _maxLoadedPages;
+    private readonly long _maxLoadedBytes;
     private readonly Action<string> _log;
     private readonly Dictionary<string, Loaded> _loaded = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _problems = new(StringComparer.Ordinal);
@@ -30,12 +31,15 @@ internal sealed class PackageSet
     private List<PackageDescriptor> _entries = [];
     private long _clock;
 
-    private sealed record Loaded(PackageDescriptor Entry, PackageResult Result, IReadOnlySet<string> Digests, int Pages, bool Chunks)
+    /// <summary>What the Reader builds per page, beside the file bytes: about 30 KB (bench/README.md).</summary>
+    internal const long BytesPerPage = 30_000;
+
+    private sealed record Loaded(PackageDescriptor Entry, PackageResult Result, IReadOnlySet<string> Digests, int Pages, long Bytes, bool Chunks)
     {
         public long LastUsed { get; set; }
     }
 
-    private PackageSet(Library library, ReadOptions read, IPackageSource source, int maxLoadedPages, IReadOnlyList<IEmbedder> embedders, Action<string> log)
+    private PackageSet(Library library, ReadOptions read, IPackageSource source, int maxLoadedPages, long maxLoadedBytes, IReadOnlyList<IEmbedder> embedders, Action<string> log)
     {
         Library = library;
         Embedders = embedders;
@@ -43,6 +47,7 @@ internal sealed class PackageSet
         _read = read;
         _source = source;
         _maxLoadedPages = maxLoadedPages;
+        _maxLoadedBytes = maxLoadedBytes;
         _log = log;
     }
 
@@ -93,6 +98,8 @@ internal sealed class PackageSet
         var read = new ReadOptions
         {
             TrustRoot = options.TrustRoot,
+            // Attestations §8: the host may serve only signed packages.
+            RequireSignature = options.RequireSignature,
             // Sigstore attestations verify offline against the trust root's sigstore.trustedRoot (attestations §6).
             SigstoreVerifier = new OpenMoca.Reader.Sigstore.SigstoreVerifier(),
             ResolveMember = options.MemberFolders.Count > 0
@@ -103,7 +110,7 @@ internal sealed class PackageSet
                     return match is null ? null : await source.OpenAsync(match, ct).ConfigureAwait(false);
                 },
         };
-        var set = created = new PackageSet(library, read, source, options.MaxLoadedPages, options.Embedders, log);
+        var set = created = new PackageSet(library, read, source, options.MaxLoadedPages, options.MaxLoadedBytes, options.Embedders, log);
         var listed = await source.ListAsync(cancellationToken).ConfigureAwait(false);
         set._entries = [.. listed.Where(e => !e.LoadAtStart)];
         var started = new List<PackageDescriptor>();
@@ -197,6 +204,7 @@ internal sealed class PackageSet
         var keep = new HashSet<string>(wanted.Select(e => e.Key), StringComparer.Ordinal);
         var digests = new HashSet<string>(StringComparer.Ordinal);
         var notLoaded = new List<string>();
+        var first = true;
         foreach (var entry in wanted)
         {
             if (_problems.ContainsKey(entry.Key))
@@ -206,10 +214,11 @@ internal sealed class PackageSet
 
             if (!_loaded.TryGetValue(entry.Key, out var loaded))
             {
-                // Over the budget with nothing left to unload: an "every package" call stops here, except for a
-                // package that supersedes one already loaded, which must load or the older one would look current.
+                // Over the budget with nothing left to unload: a call stops loading here, except for the first package a
+                // named call needs, and a package that supersedes one already loaded, which must load or the older one
+                // would look current.
                 var supersedesLoaded = _loaded.Values.Any(l => entry.Replaces(l.Entry));
-                if (names is null && LoadedPages() >= _maxLoadedPages && !supersedesLoaded)
+                if (OverBudget() && !supersedesLoaded && (names is null || !first))
                 {
                     notLoaded.Add(entry.Key);
                     continue;
@@ -225,6 +234,7 @@ internal sealed class PackageSet
             }
 
             loaded.LastUsed = ++_clock;
+            first = false;
             if (searched.Contains(entry.Key))
             {
                 digests.UnionWith(loaded.Digests);
@@ -293,18 +303,23 @@ internal sealed class PackageSet
             return already;
         }
 
-        // Of the indexes beside the package, the one an installed model can search; else the first.
+        // Of the indexes beside the package, those an installed model can search first, then the rest, each in name
+        // order. The first that binds is used: a name pattern can also match a neighbour's index (a.b.mocai beside
+        // a.moca), which fails the digest check, so a failure moves on to the next candidate.
         var candidates = entry.Sidecars.Count > 0 ? entry.Sidecars : entry.Sidecar is null ? [] : [entry.Sidecar];
-        var sidecar = candidates.FirstOrDefault(c => SidecarModel.Read(c) is { } model
-            && Embedders.Any(e => DenseBackend.ModelMismatch(e, model, e.Dimensions) is null)) ?? candidates.FirstOrDefault();
+        var ordered = candidates.Select(c => (Path: c, Searchable: Searchable(c))).OrderBy(c => c.Searchable ? 0 : 1).Select(c => c.Path);
         SidecarBinding? binding = null;
-        if (sidecar is not null)
+        foreach (var sidecar in ordered)
         {
-            binding = SidecarBinder.Bind(sidecar, result);
-            if (!binding.Usable)
+            var attempt = SidecarBinder.Bind(sidecar, result);
+            if (attempt.Usable)
             {
-                _log($"ignoring sidecar {sidecar} for {entry.Location}: {string.Join(", ", binding.Diagnostics.Select(d => d.Code))}");
+                binding = attempt;
+                break;
             }
+
+            _log($"ignoring sidecar {sidecar} for {entry.Location}: {string.Join(", ", attempt.Diagnostics.Select(d => d.Code))}");
+            binding ??= attempt;
         }
 
         var before = Library.Packages.Select(p => p.Result.Digest!).ToHashSet(StringComparer.Ordinal);
@@ -312,6 +327,8 @@ internal sealed class PackageSet
         var added = Library.Packages.Select(p => p.Result.Digest!).Where(d => !before.Contains(d)).ToHashSet(StringComparer.Ordinal);
         added.Add(result.Digest!);
         var pages = Library.Packages.Where(p => added.Contains(p.Result.Digest!)).Sum(p => p.Result.Nodes.Count);
+        var bytes = Library.Packages.Where(p => added.Contains(p.Result.Digest!))
+            .Sum(p => p.Result.FileBytes.Values.Sum(b => (long)b.Length) + (p.Result.Nodes.Count * BytesPerPage));
 
         var full = entry with
         {
@@ -322,18 +339,26 @@ internal sealed class PackageSet
             Supersedes = Catalogue.SupersedesOf(result.Manifest),
             LoadAtStart = entry.LoadAtStart,
         };
-        var loaded = new Loaded(full, result, added, pages, binding is { Usable: true }) { LastUsed = ++_clock };
+        var loaded = new Loaded(full, result, added, pages, bytes, binding is { Usable: true }) { LastUsed = ++_clock };
         _loaded[key] = loaded;
         _log($"loaded {result.Id}@{result.Version} {result.Digest} [{string.Join(", ", result.Capabilities)}]");
         return loaded;
     }
 
+    // A sidecar whose model an installed embedder can search.
+    private bool Searchable(string sidecar) =>
+        SidecarModel.Read(sidecar) is { } model && Embedders.Any(e => DenseBackend.ModelMismatch(e, model, e.Dimensions) is null);
+
     private int LoadedPages() => _loaded.Values.Sum(l => l.Pages);
+
+    private long LoadedBytes() => _loaded.Values.Sum(l => l.Bytes);
+
+    private bool OverBudget() => LoadedPages() >= _maxLoadedPages || LoadedBytes() >= _maxLoadedBytes;
 
     // Unloads least recently used packages, never one the current call needs, until within the budget.
     private void Evict(IReadOnlySet<string> keep)
     {
-        while (LoadedPages() > _maxLoadedPages)
+        while (LoadedPages() > _maxLoadedPages || LoadedBytes() > _maxLoadedBytes)
         {
             var victim = _loaded.Values.Where(l => !keep.Contains(l.Entry.Key)).OrderBy(l => l.LastUsed).FirstOrDefault();
             if (victim is null)
@@ -341,7 +366,7 @@ internal sealed class PackageSet
                 return;
             }
 
-            _log($"unloading {victim.Entry.Key} (memory budget, --max-loaded-pages {_maxLoadedPages})");
+            _log($"unloading {victim.Entry.Key} (memory budget: --max-loaded-mb {_maxLoadedBytes / 1_000_000}, --max-loaded-pages {_maxLoadedPages})");
             Unload(victim.Entry.Key);
         }
     }

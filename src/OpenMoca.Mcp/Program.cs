@@ -65,6 +65,10 @@ try
         Overlays = [.. options.Overlays.Select(o => new OpenMoca.Reader.Structure.StructureOverlay(o.Id, o.Layer, File.ReadAllText(o.Path)))],
         MemberFolders = options.Members,
         MaxLoadedPages = options.MaxLoadedPages,
+        MaxLoadedBytes = options.MaxLoadedBytes,
+        RequireSignature = options.RequireSignature,
+        // Reader contract §15.4: the creator's terms, for where the client's model runs.
+        Terms = new OpenMoca.Reader.Search.TermsRequest { Ai = new OpenMoca.Reader.Search.AiRequest(options.Destination, options.Conditions) },
         Preload = options.Preload,
         Embedders = embedders,
         ServerVersion = version,
@@ -85,7 +89,13 @@ if (moca.Packages.Count == 0)
 
 if (options.Library.Count > 0)
 {
-    Log($"library: {moca.Packages.Count} package(s); each loads on first use (--max-loaded-pages {options.MaxLoadedPages})");
+    Log($"library: {moca.Packages.Count} package(s); each loads on first use (--max-loaded-mb {options.MaxLoadedBytes / 1_000_000}, --max-loaded-pages {options.MaxLoadedPages})");
+}
+
+Log($"creator's terms: applied for {options.Destination}{(options.Conditions.Count > 0 ? $" ({string.Join(", ", options.Conditions)})" : "")}");
+if (options.TrustRoot is not null && !options.RequireSignature)
+{
+    Log("unsigned packages, and packages whose signature fails, are served too; add --require-signature to serve only signed packages");
 }
 
 var server = McpServer.Create(new StdioServerTransport("moca-mcp"), moca.ServerOptions);

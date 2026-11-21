@@ -8,7 +8,7 @@
   <PropertyGroup>
     <RootNamespace>OpenMoca.Mcp</RootNamespace>
     <PackageId>OpenMoca.Mcp.Server</PackageId>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <Description>The MOCA MCP server as a library: serve MOCA knowledge packages over the Model Context Protocol from your own host, with your own package source or embedder.</Description>
     <Authors>MOCA Standard Contributors</Authors>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

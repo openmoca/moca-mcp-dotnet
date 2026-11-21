@@ -3,6 +3,46 @@
 All notable changes to moca-mcp for .NET (`OpenMoca.Mcp`). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-11-15
+
+### Added (the creator's terms: moca-spec package spec §4.14, Reader contract §15.4)
+
+- The server applies the creator's terms to everything it returns: `moca_search` results, `moca_get_node`, the nodes
+  `moca_structure` gives, and resources (listed and read). By default it treats the client as a third party's model
+  with no conditions, as the contract asks of a server with no configuration. `--destination provider|host|device`
+  and `--conditions noTraining,noRetention` say where the model runs and what its provider meets
+  (`MocaMcpOptions.Terms`). A search that left results out says so in `termsNote`; a node left out says why.
+- `moca_package_info` gives the package's terms as written, their problems and who stated them; full records carry
+  each node's resolved terms, licence and copyright.
+
+### Added (hardening)
+
+- `--require-signature` (`MocaMcpOptions.RequireSignature`): serve only packages with a valid package attestation
+  under the trust root. The server suggests it when a trust root is given without it.
+- Bounded answers: a record's text is cut at 100,000 bytes (`MaxTextBytes`) and marked `truncated`; an answer stops
+  adding records past 400,000 bytes (`MaxResponseBytes`) and says `truncated`. `moca_structure`'s `nodes` gives 20
+  at a time, with `limit` (up to 100), `offset` and `nextOffset`. Resources are listed 100 at a time, with a cursor.
+- A memory budget in bytes, `--max-loaded-mb` (default 1,000; `MocaMcpOptions.MaxLoadedBytes`), beside the page
+  budget: each package counts its files plus about 30 KB a page. A call that names packages now stops loading at the
+  budget too, apart from the first package it needs.
+- Versioned ids: `moca_get_node` with an id that names no version gives the newest loaded version that may be
+  served, by Semantic Versioning precedence, and lists the others in `otherVersions`. Before, it gave whichever
+  version loaded first.
+
+### Changed
+
+- Built on the 0.7.0 .NET Reader (moca-spec 0.7.0): media descriptions,
+  alternates and refined time ranges in citation records, binding by
+  composition, and bounded work for compositions.
+- Sidecar indexes beside a package are found as `<name>.mocai` and
+  `<name>.<model>.mocai`, a Zip archive or a folder (package spec §12.1).
+  The earlier names, `.moca.idx` and `.moca.idx.zip`, are still found, after
+  the new one. When several are beside a package, the server tries each until one binds, so another package's
+  index whose name matches is passed over.
+- CI packs OpenMoca.Reader 0.7.0 from moca-reader-dotnet at a pinned commit
+  until it is on NuGet, and pins moca-spec to its release-0.7.0 head. The expected answers follow the 0.7.0
+  examples and Reader (credits, alternative labels, `license` in records, and 0.7.0 scores).
+
 ## [0.6.0] - 2026-11-11
 
 ### Added (Sigstore)

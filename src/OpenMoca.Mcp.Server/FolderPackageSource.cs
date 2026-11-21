@@ -27,7 +27,7 @@ public sealed record FolderPackageSourceOptions
 /// <summary>
 /// Packages on the local disk: packages named one by one, and library folders scanned by reading only manifests
 /// (unpacked packages, and the <c>moca.json</c> entry of <c>.moca</c> files). A sidecar beside a package, named
-/// <c>&lt;name&gt;.moca.idx</c> or <c>&lt;name&gt;.&lt;model&gt;.moca.idx</c> (or a Zip of one, ending <c>.zip</c>), is bound to it. Links are not followed,
+/// <c>&lt;name&gt;.mocai</c> or <c>&lt;name&gt;.&lt;model&gt;.mocai</c> (or with the earlier double extensions), is bound to it. Links are not followed,
 /// and nothing outside the folders is read.
 /// </summary>
 public sealed class FolderPackageSource : IPackageSource, IDisposable

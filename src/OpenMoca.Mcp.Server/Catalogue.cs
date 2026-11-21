@@ -7,8 +7,8 @@ namespace OpenMoca.Mcp;
 /// <summary>
 /// Finds packages in library folders, reading only each manifest: unpacked packages (a folder holding
 /// <c>moca.json</c>, which is not looked inside further) and <c>.moca</c> files (their <c>moca.json</c> entry only).
-/// Beside each, a sidecar index named <c>&lt;name&gt;.moca.idx</c>, or <c>&lt;name&gt;.&lt;model&gt;.moca.idx</c>, is
-/// bound to it (a Zip of one ends <c>.moca.idx.zip</c>). Nothing outside the folders is read, and links are not followed.
+/// Beside each, a sidecar index named <c>&lt;name&gt;.mocai</c>, or <c>&lt;name&gt;.&lt;model&gt;.mocai</c> (or with
+/// the earlier double extensions), is bound to it. Nothing outside the folders is read, and links are not followed.
 /// </summary>
 internal static class Catalogue
 {
@@ -144,9 +144,10 @@ internal static class Catalogue
     }
 
     /// <summary>
-    /// The sidecars beside a package: <c>&lt;name&gt;.moca.idx</c> first, then one per model, by name. Each may be a
-    /// folder, or a Zip of one named with <c>.zip</c> on the end (<c>&lt;name&gt;.&lt;model&gt;.moca.idx.zip</c>), as
-    /// release downloads are.
+    /// The sidecars beside a package: <c>&lt;name&gt;.mocai</c> first, then one per model
+    /// (<c>&lt;name&gt;.&lt;model&gt;.mocai</c>), by name (package spec §12.1). Each may be the Zip archive, as
+    /// release downloads are, or a folder. Sidecars named with the earlier double extensions (<c>.moca.idx</c>, and
+    /// <c>.moca.idx.zip</c> for a Zip) are still found, after the new name. The Reader then reads each by its content.
     /// </summary>
     internal static IReadOnlyList<string> SidecarsFor(string path)
     {
@@ -154,7 +155,7 @@ internal static class Catalogue
         var name = Path.GetFileName(path);
         var stem = name.EndsWith(".moca", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
         var found = new List<string>();
-        foreach (var plain in new[] { $"{stem}.moca.idx", $"{stem}.moca.idx.zip" }.Select(n => Path.Combine(dir, n)))
+        foreach (var plain in new[] { $"{stem}.mocai", $"{stem}.moca.idx", $"{stem}.moca.idx.zip" }.Select(n => Path.Combine(dir, n)))
         {
             if (File.Exists(plain) || Directory.Exists(plain))
             {
@@ -162,7 +163,8 @@ internal static class Catalogue
             }
         }
 
-        found.AddRange(Directory.EnumerateFileSystemEntries(dir, $"{stem}.*.moca.idx")
+        found.AddRange(Directory.EnumerateFileSystemEntries(dir, $"{stem}.*.mocai")
+            .Concat(Directory.EnumerateFileSystemEntries(dir, $"{stem}.*.moca.idx"))
             .Concat(Directory.EnumerateFiles(dir, $"{stem}.*.moca.idx.zip"))
             .Order(StringComparer.Ordinal));
         return found;

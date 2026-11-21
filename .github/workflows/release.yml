@@ -3,16 +3,35 @@ name: Release
 # Push a vX.Y.Z tag: builds the six self-contained files, attaches them with their SHA-256 sums to a GitHub
 # release, and publishes the OpenMoca.Mcp .NET tool and the OpenMoca.Mcp.Server library to NuGet.
 #
-# The builds are unsigned for now. macOS builds run on macOS, so the SDK gives each one the ad-hoc signature Apple
+# Each zip, and the program inside it, gets a build provenance attestation: a statement, signed through Sigstore with
+# this workflow's identity, that this workflow built it from the tagged commit. Anyone can check one with
+# `gh attestation verify` (the README says how).
+#
+# The builds are not code-signed yet. macOS builds run on macOS, so the SDK gives each one the ad-hoc signature Apple
 # silicon needs to run it at all. When the signing certificates are in place, sign and notarise the macOS files and
 # sign the Windows files here, with the secrets held only in this workflow.
+#
+# Trusted publishing: nuget.org accepts this workflow, in the `release` environment, through a short-lived
+# OIDC token from GitHub Actions, and gives it an API key that lasts one hour. There is no NuGet API key in
+# this repository. NUGET_USER is the nuget.org profile name that owns the packages; it is not a credential.
+# Tag this repository only once the OpenMoca.Reader version it names is on NuGet.
+#
+# On a pull request to main, two of the six files are built and both packages packed, with OpenMoca.Reader packed
+# from moca-reader-dotnet at the pinned commit until it is on NuGet, as the tests do. That proves the release path
+# before release day; nothing is released or published.
 on:
   push:
     tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # Used by the dry run only, until OpenMoca.Reader 0.7.0 is on NuGet. Move it with test.yml's pin.
+  MOCA_READER_DOTNET_REF: 33cad253cb5e42934bacbe964cce56cf6816e20d  # release-0.7.0 (0.7.0 release candidate); v0.7.0 once tagged
 
 jobs:
   build:
@@ -20,25 +39,43 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        include:
-          - { rid: win-x64, os: ubuntu-latest }
-          - { rid: win-arm64, os: ubuntu-latest }
-          - { rid: linux-x64, os: ubuntu-latest }
-          - { rid: linux-arm64, os: ubuntu-latest }
-          - { rid: osx-x64, os: macos-latest }
-          - { rid: osx-arm64, os: macos-latest }
-    runs-on: ${{ matrix.os }}
+        # A pull request builds one file on each kind of runner; a tag builds all six.
+        rid: ${{ fromJSON(github.event_name == 'pull_request' && '["linux-x64","osx-arm64"]' || '["win-x64","win-arm64","linux-x64","linux-arm64","osx-x64","osx-arm64"]') }}
+    runs-on: ${{ startsWith(matrix.rid, 'osx') && 'macos-latest' || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: moca-mcp-dotnet
-      - uses: actions/setup-dotnet@v6
+          fetch-depth: 0
+      - name: The tag is on main and matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: moca-mcp-dotnet
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
+          for f in src/OpenMoca.Mcp/OpenMoca.Mcp.csproj src/OpenMoca.Mcp.Server/OpenMoca.Mcp.Server.csproj; do
+            version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$f")
+            [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "::error::$f is $version, the tag is $GITHUB_REF_NAME"; exit 1; }
+          done
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: moca-mcp-dotnet/global.json
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          repository: ${{ github.repository_owner }}/moca-reader-dotnet
+          ref: ${{ env.MOCA_READER_DOTNET_REF }}
+          path: moca-reader-dotnet
+          token: ${{ secrets.MOCA_REPOS_TOKEN || github.token }}
+      - name: Pack OpenMoca.Reader from the pinned commit (dry run)
+        if: github.event_name == 'pull_request'
+        working-directory: moca-reader-dotnet
+        run: |
+          dotnet pack -c Release -o "$RUNNER_TEMP/feed"
+          echo "FEED=-p:RestoreAdditionalProjectSources=$RUNNER_TEMP/feed" >> "$GITHUB_ENV"
       - name: Publish
         working-directory: moca-mcp-dotnet
         run: >
-          dotnet publish src/OpenMoca.Mcp -c Release -r ${{ matrix.rid }} --self-contained
+          dotnet publish src/OpenMoca.Mcp -c Release -r ${{ matrix.rid }} --self-contained $FEED
           -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=none -p:AllowedReferenceRelatedFileExtensions=none
           -o ../out/${{ matrix.rid }}
@@ -47,43 +84,76 @@ jobs:
         run: |
           cp ../../moca-mcp-dotnet/LICENSE ../../moca-mcp-dotnet/NOTICE ../../moca-mcp-dotnet/README.md .
           zip -q ../moca-mcp-${{ matrix.rid }}.zip *
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: moca-mcp-${{ matrix.rid }}
           path: out/moca-mcp-${{ matrix.rid }}.zip
+      - name: Pack the .NET tool and the library (dry run)
+        if: github.event_name == 'pull_request' && matrix.rid == 'linux-x64'
+        working-directory: moca-mcp-dotnet
+        run: |
+          dotnet pack src/OpenMoca.Mcp.Server -c Release -o ../nupkg $FEED
+          dotnet pack src/OpenMoca.Mcp -c Release -o ../nupkg $FEED
+          ls ../nupkg
 
   release:
     name: Release and publish
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: moca-mcp-dotnet
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: dist
           merge-multiple: true
       - name: SHA-256 sums
         working-directory: dist
         run: sha256sum *.zip > SHA256SUMS
+      - name: Take the program out of each zip, to attest it as well
+        working-directory: dist
+        run: |
+          for z in *.zip; do
+            rid="${z#moca-mcp-}"; rid="${rid%.zip}"
+            mkdir -p "../programs/$rid"
+            unzip -q "$z" -x LICENSE NOTICE README.md -d "../programs/$rid"
+          done
+          ls -R ../programs
+      # Before the release exists, so a release is never made without its attestations.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.zip
+            programs/*/moca-mcp
+            programs/*/moca-mcp.exe
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" \
             --notes "See CHANGELOG.md. Unsigned builds: the README says what macOS and Windows show the first time."
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: moca-mcp-dotnet/global.json
-      - name: Pack and publish the .NET tool and the library
+      - name: Pack the .NET tool and the library
         working-directory: moca-mcp-dotnet
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           dotnet pack src/OpenMoca.Mcp.Server -c Release -o ../nupkg
           dotnet pack src/OpenMoca.Mcp -c Release -o ../nupkg
-          dotnet nuget push ../nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      # Ask for the key just before pushing: it lasts one hour.
+      - name: NuGet login (OIDC)
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Publish the .NET tool and the library
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

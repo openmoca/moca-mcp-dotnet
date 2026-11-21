@@ -3,7 +3,7 @@
   "name": "io.github.openmoca/moca-mcp",
   "title": "MOCA",
   "description": "Search and cite MOCA knowledge packages, verified and with citation records, on your machine.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "websiteUrl": "https://openmoca.org/tools/mcp/",
   "repository": {
     "url": "https://github.com/openmoca/moca-mcp-dotnet",
@@ -14,7 +14,7 @@
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "OpenMoca.Mcp",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "transport": { "type": "stdio" },
       "packageArguments": [
         {
