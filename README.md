@@ -143,7 +143,10 @@ moca-mcp --library ~/moca --trust-root ~/moca/trust-root.json
   packages starts at once. Each package is read and verified the first time a
   question needs it, then kept in memory for the session.
 - **Ask about one package at a time.** The assistant lists the packages with
-  `moca_list_packages`, then names the ones it wants in `moca_search`.
+  `moca_list_packages`, then names the ones it wants in `moca_search`. Listing
+  reads every package, within the memory budget: what the assistant may be
+  told about a package depends on its terms and audience, which are known only
+  once it is read.
 - **Indexes are found by name.** `acme.mocai`, or `acme.<model>.mocai`,
   beside `acme.moca` or the `acme` folder, is used for that package. Either can
   be a folder, or a Zip with `.zip` on the end, as downloaded.
@@ -204,18 +207,18 @@ moca-mcp [package...] [--library folders...] [--trust-root file] [--audience pub
 | `--max-loaded-mb <n>` | Memory budget in megabytes (default 1,000). Each loaded package counts its files plus about 30 KB a page. The least recently used package is unloaded beyond it, and a call loads no more packages than fit, apart from the first it needs |
 | `--max-loaded-pages <n>` | Memory budget in pages kept loaded at once (default 25,000), beside `--max-loaded-mb` |
 
-Invalid packages are skipped and reported on standard error;
-`moca_list_packages` says why.
+Invalid packages are skipped and reported on standard error, with why. The
+assistant is told nothing about them: to it, they are not there.
 
 ## Tools and resources
 
 | Tool | Returns |
 | --- | --- |
-| `moca_list_packages` | Every package the server can serve, loaded or not: id, version, title, description; for a loaded package its digest, signature, capabilities, page count and search mode |
+| `moca_list_packages` | The packages the assistant may be told of, by id then version: id, version, title, description, publisher, tags, digest, signature, capabilities, page count and search mode. A closed package (below) has only id, version, title, publisher, signed and `closedBy` |
 | `moca_search` | Citation records, compact by default; `detail: "full"` for whole records. `packages` limits it to some packages; `mode` is `lexical`, `semantic` or `hybrid`. Out-of-force, superseded and deprecated content is left out unless the host starts the server with `--include-excluded`: the assistant cannot ask for it |
 | `moca_structure` | Structure answers: `concept`, `requires`, `required_by`, `parts`, `narrower`, `broader`, `related`, `sequence` or `nodes`, each naming its layer. `nodes` gives 20 at a time (`limit` up to 100) and `nextOffset` when there are more |
 | `moca_get_node` | One citation record with the page's full text. An id without a version (`<package id>#<path>`) gives the newest loaded version that may be served, and names the others in `otherVersions`; a ref (`<package id>@<version>#<path>`) gives that version |
-| `moca_package_info` | One package's manifest, digest, signers, attestations, members, profiles, the creator's terms and the Reader's findings: why it is, or is not, trusted |
+| `moca_package_info` | One package's manifest, digest, signers, attestations, members, profiles, the creator's terms and the Reader's findings: why it is, or is not, trusted. A closed package gives only what the list gives |
 
 Every tool is marked read-only, and no tool takes a file path: the assistant
 can only choose among the packages you serve. Input is bounded and checked
@@ -233,14 +236,48 @@ saying `truncated`.
 A package's manifest can say how its creator lets AI use the work, for
 example "no third party's model" or "no training"
 ([package spec §4.14](https://github.com/openmoca/moca-spec/blob/main/spec/moca-package-spec.md#414-terms)).
-The server applies those terms to everything it returns
-([Reader contract §15.4](https://github.com/openmoca/moca-spec/blob/main/spec/moca-reader-contract.md#154-the-terms-gate)):
-search results, nodes, the nodes bound to a concept, and resources. An MCP
+Everything the server returns goes to an AI assistant, so the server applies
+those terms to all of it
+([Reader contract §15.4](https://github.com/openmoca/moca-spec/blob/main/spec/moca-reader-contract.md#154-the-terms-gate)).
+
+**Set the destination.** The terms depend on where the model runs. An MCP
 client is a model, so by default the server treats it as a third party's
-model with no conditions, and leaves out what the creator does not allow
-there. Say where your model runs with `--destination`: `device` when it runs
-on the person's own device, `host` when it is your own service. A search that
+model with no conditions (`provider`). Say where yours runs:
+
+| Your model | Start the server with |
+| --- | --- |
+| A third party's service (the default) | nothing, or `--destination provider` |
+| A third party's service that does not train on or keep what it is sent | `--destination provider --conditions noTraining,noRetention` |
+| Your own service | `--destination host` |
+| The person's own device | `--destination device` |
+
+A host using the library sets the same in `MocaMcpOptions.Terms`. The
+assistant cannot change it.
+
+**What the assistant is given.** From a package the terms allow: search
+results, nodes and resources with their text, structure labels and
+definitions, and the package's details. Package text, such as titles,
+publisher names and page text, is always in its own JSON field, never inside
+the server's own sentences.
+
+**What it is not given.** A package is **closed** when its terms do not allow
+the destination. Its text, labels, definitions, description, tags, manifest
+and findings are withheld. The assistant can be told only that it exists:
+`moca_list_packages` and `moca_package_info` give exactly its id, version,
+title, publisher, `signed` and `closedBy` (the terms that close it), so the
+assistant can tell the person why it cannot answer from it. A search that
 left results out says so in `termsNote`.
+
+A creator can also say that a model it closed the work to may not be told the
+work exists (`ai.allowed.mention: false`). That package is **hidden**: every
+tool and resource answers as if the server did not have it, it is left out of
+lists before they are paged, and no note or count includes it. The server does not
+even say that something was left out.
+None of this changes what an app shows a person.
+
+Content stays out of the assistant's view, not out of the server: the server
+log still names every package it loads. The server never sends package text
+to an embedding model; it embeds only the assistant's queries.
 
 Terms are the creator's labels, not locks: the server applies them, and the
 model you connect has its own terms for what it does with the text.

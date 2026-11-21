@@ -101,6 +101,9 @@ public sealed class SemanticTests
             var search = await ServerTests.CallAsync(client, "moca_search", new() { ["query"] = "refund", ["mode"] = "semantic" });
             Assert.Equal("lexical", (string?)search["mode"]);
             Assert.Contains("moca-mcp models add bge-small-en-v1.5", (string)search["modeNote"]!, StringComparison.Ordinal);
+            // The model's name comes from the index, so it is a field of its own, never in the server's sentence.
+            Assert.NotEmpty(search["missingModels"]!.AsArray());
+            Assert.DoesNotContain((string)search["missingModels"]![0]!, ((string)search["modeNote"]!).Replace("moca-mcp models add bge-small-en-v1.5", "", StringComparison.Ordinal), StringComparison.Ordinal);
         }
         finally
         {

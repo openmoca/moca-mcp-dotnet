@@ -15,6 +15,36 @@ All notable changes to moca-mcp for .NET (`OpenMoca.Mcp`). The format follows
 - `moca_package_info` gives the package's terms as written, their problems and who stated them; full records carry
   each node's resolved terms, licence and copyright.
 
+### Added (what the terms gate covers: moca-spec ADR-0041)
+
+- Everything the server hands the assistant goes through the creator's terms, not only records. `moca_structure`
+  answers from the structure of the packages that are not closed for the server's destination, so a closed
+  package's labels and definitions are not there. `moca_list_packages` and `moca_package_info` give the Reader's
+  catalogue: a closed package has exactly `id`, `version`, `title`, `publisher`, `signed` and `closedBy`.
+- A creator can hide a closed package with `ai.allowed.mention: false`. A hidden package gets exactly the answer
+  for a package the server does not have, from every tool and resource. It is left out of lists before paging, out
+  of `unknownPackages` and `notSearched` (as an unknown name), and out of every note. An open package's details
+  leave out members and relations that name a hidden package, and findings about a closed or hidden package.
+- `MocaMcpServer.CreateAsync` refuses a `MocaMcpOptions.Terms` with no `ai` part: the server always has a
+  destination.
+- A canary test: an open, a closed and a hidden package with marker text, and every tool and resource called
+  against them. The hidden package's markers appear nowhere, and every answer is the same as from a server that
+  never had it.
+
+### Changed (what the terms gate covers)
+
+- `moca_list_packages` reads every package the server can serve, within the memory budget, before it answers: a
+  package's terms, audience and validity are known only once it is read. It lists only packages with a catalogue
+  entry, ordered by id then version. A package outside the audience set, superseded or out of force (unless the
+  host opted in), not valid, or not loaded for the memory budget is not listed. `loaded` and `problem` are gone;
+  `publisher` and `tags` are new; `members` lists member ids.
+- `moca_package_info` answers "no package" for a package that could not be loaded, as for one it does not have. Why
+  it could not be loaded is in the server's log.
+- `notSearched` names only packages the call named. A call over every package says only that some were not
+  searched.
+- `resources/read` with an address that names no version gives the newest version that may be served, as
+  `moca_get_node` does.
+
 ### Added (hardening)
 
 - `--require-signature` (`MocaMcpOptions.RequireSignature`): serve only packages with a valid package attestation

@@ -240,7 +240,7 @@ internal static class MocaServer
     {
         var names = Strings(args, "packages");
         var selection = Visible(set, await set.SelectAsync(names, cancellationToken).ConfigureAwait(false), names, Hidden(set, mcp));
-        var (backend, mode, note) = Backend(set, selection, Closed(set, mcp), String(args, "mode"));
+        var (backend, mode, note, missing) = Backend(set, selection, Closed(set, mcp), String(args, "mode"));
         var search = new MocaSearch(set.Library, backend, mcp.Audiences, mcp.SearchHooks) { AllowUnlabelled = mcp.AllowUnlabelled };
         var query = args["query"].GetString()!;
         var options = new SearchOptions
@@ -272,6 +272,12 @@ internal static class MocaServer
             result["modeNote"] = note;
         }
 
+        // Model names come from the packages' indexes: package-supplied text, so a field of their own (contract §12).
+        if (missing.Count > 0)
+        {
+            result["missingModels"] = new JsonArray([.. missing.Select(m => (JsonNode)m)]);
+        }
+
         AddSelectionNotes(result, selection);
         return result;
     }
@@ -282,7 +288,7 @@ internal static class MocaServer
     /// When meaning search is asked for but unavailable, it says why and searches by words. A closed package's index is
     /// not looked at: nothing it returns may be handed on, and the note says nothing about it.
     /// </summary>
-    private static (ISearchBackend Backend, string Mode, string? Note) Backend(PackageSet set, Covered selection, IReadOnlySet<string> closed, string? requested)
+    private static (ISearchBackend Backend, string Mode, string? Note, IReadOnlyList<string> Missing) Backend(PackageSet set, Covered selection, IReadOnlySet<string> closed, string? requested)
     {
         var lexical = new SelectedPackages(set.Backend, selection.Digests);
         var semantic = selection.Digests.Where(d => !closed.Contains(d)).Select(d => (Digest: d, Info: set.SemanticOf(d))).Where(x => x.Info is not null).ToList();
@@ -296,7 +302,7 @@ internal static class MocaServer
         if (missing.Count > 0)
         {
             var install = missing.Select(n => OpenMoca.Reader.Onnx.StandardModel.Find(n)?.Id).OfType<string>().ToList();
-            note = $"Some packages' indexes need a model that is not installed ({string.Join(", ", missing)}); they were searched by words."
+            note = "Some packages' indexes need a model that is not installed (missingModels); they were searched by words."
                 + (install.Count > 0 ? $" To search them by meaning, run: moca-mcp models add {string.Join(' ', install)}" : "");
         }
 
@@ -304,15 +310,15 @@ internal static class MocaServer
         if (mode != "lexical" && groups.Count == 0)
         {
             note ??= "None of these packages has an index built with an installed model, so they were searched by words.";
-            return (lexical, "lexical", note);
+            return (lexical, "lexical", note, missing);
         }
 
         var dense = groups.Count == 1 ? groups[0] : new FusedBackend(groups);
         return mode switch
         {
-            "semantic" => (dense, mode, note),
-            "hybrid" => (new HybridBackend(lexical, dense), mode, note),
-            _ => (lexical, "lexical", note),
+            "semantic" => (dense, mode, note, missing),
+            "hybrid" => (new HybridBackend(lexical, dense), mode, note, missing),
+            _ => (lexical, "lexical", note, missing),
         };
     }
 
