@@ -326,6 +326,65 @@ public sealed class CanaryTests
     }
 
     [Fact]
+    public async Task Under_memory_pressure_a_named_package_that_is_unknown_hidden_invalid_or_not_loaded_gets_one_answer()
+    {
+        var root = Directory.CreateTempSubdirectory("moca-canary-").FullName;
+        try
+        {
+            var open2 = Make("opentwo", null);
+            var broken = Make("broken", null);
+            foreach (var c in new[] { Open, open2, Named, Hidden })
+            {
+                Write(root, c);
+            }
+
+            // Not a valid package: its manifest has no title.
+            var brokenDir = Write(root, broken);
+            var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(brokenDir, "moca.json")))!.AsObject();
+            manifest.Remove("title");
+            File.WriteAllText(Path.Combine(brokenDir, "moca.json"), manifest.ToJsonString());
+
+            // Room for one page: each package has one, so a call loads the first package it names and no more. Each
+            // call starts a fresh server, so the first package named is never already loaded.
+            async Task<List<string>> AnswersFor(string name, bool first)
+            {
+                List<string[]> calls = first ? [[Open.Id, name], [name, Open.Id], [name]] : [[Open.Id, name]];
+                var answers = new List<string>();
+                foreach (var packages in calls)
+                {
+                    foreach (var (tool, args) in new (string, Dictionary<string, object?>)[]
+                    {
+                        ("moca_search", new() { ["query"] = "lantern", ["packages"] = packages }),
+                        ("moca_structure", new() { ["op"] = "nodes", ["iri"] = Open.Iri, ["packages"] = packages }),
+                    })
+                    {
+                        await using var client = await ConnectAsync(new MocaMcpOptions { MaxLoadedPages = 1 }, root, library: true);
+                        var result = await client.CallToolAsync(tool, args, cancellationToken: TestContext.Current.CancellationToken);
+                        answers.Add(WithoutScores(((TextContentBlock)result.Content[0]).Text).Replace(name, "X", StringComparison.Ordinal));
+                    }
+                }
+
+                return answers;
+            }
+
+            var unknown = await AnswersFor(Make("unknown", null).Id, first: true);
+            Assert.Contains(Open.Body, unknown[0], StringComparison.Ordinal);
+            Assert.Contains("unknownPackages", unknown[0], StringComparison.Ordinal);
+            foreach (var name in new[] { Hidden.Id, Hidden.Key, broken.Id })
+            {
+                Assert.Equal(unknown, await AnswersFor(name, first: true));
+            }
+
+            // A package that may be served, but that the budget kept from loading, answers as unknown too.
+            Assert.Equal(unknown.Take(2), await AnswersFor(open2.Id, first: false));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task On_a_device_every_package_is_served_so_the_canary_can_fail()
     {
         var root = Directory.CreateTempSubdirectory("moca-canary-").FullName;

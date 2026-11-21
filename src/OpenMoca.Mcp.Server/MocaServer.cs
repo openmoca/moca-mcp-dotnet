@@ -205,41 +205,40 @@ internal static class MocaServer
             .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
-    /// What a call covers, as the model may be told it (Reader contract §15.4, "Nothing names a hidden package"): the
-    /// digests to use, without hidden packages; the names the caller gave that match no package it may be told of
-    /// (hidden, or not loadable, as for an unknown name); and the names the caller gave that were not loaded for the
-    /// memory budget. Packages the caller did not name are never named.
+    /// Loads what a call covers and says it as the model may be told it (Reader contract §15.4, "Nothing names a hidden
+    /// package"). A name the caller gave that matches no package the model may be told of, whether unknown, hidden, not
+    /// valid, or not loaded for the memory budget, is in <see cref="Covered.Unknown"/>: one answer for all four, so
+    /// they cannot be told apart. A hidden package never takes the memory budget from a package that may be served:
+    /// when the budget stopped a named package loading and a hidden or invalid one was named, the call loads again
+    /// without those names. Packages the caller did not name are never named.
     /// </summary>
-    private static Covered Visible(PackageSet set, Selection selection, IReadOnlyList<string>? names, IReadOnlySet<string> hidden)
+    private static async Task<Covered> SelectVisibleAsync(PackageSet set, MocaMcpOptions mcp, IReadOnlyList<string>? names, CancellationToken cancellationToken)
     {
-        var unknown = new List<string>();
-        var notSearched = new List<string>();
-        foreach (var name in (names ?? []).Distinct(StringComparer.Ordinal))
-        {
-            var keys = set.Entries.Where(e => e.Key == name || e.Id == name).Select(e => e.Key).ToList();
-            if (keys.Any(k => set.ResultFor(k)?.Digest is { } d && !hidden.Contains(d)))
-            {
-                continue;
-            }
+        var selection = await set.SelectAsync(names, cancellationToken).ConfigureAwait(false);
+        var hidden = Hidden(set, mcp);
+        List<string> Keys(string name) => [.. set.Entries.Where(e => e.Key == name || e.Id == name).Select(e => e.Key)];
+        bool Visible(string key) => set.ResultFor(key)?.Digest is { } d && !hidden.Contains(d);
 
-            if (keys.Any(selection.NotLoaded.Contains))
+        if (names is not null && selection.NotLoaded.Count > 0)
+        {
+            // Names that took no budget a served package could use: unknown, or every version hidden or not valid.
+            var gone = names.Where(n => Keys(n) is var keys && keys.All(k => !Visible(k) && !selection.NotLoaded.Contains(k))).ToHashSet(StringComparer.Ordinal);
+            if (gone.Count > 0)
             {
-                notSearched.Add(name);
-            }
-            else
-            {
-                unknown.Add(name);
+                selection = await set.SelectAsync([.. names.Where(n => !gone.Contains(n))], cancellationToken).ConfigureAwait(false);
+                hidden = Hidden(set, mcp);
             }
         }
 
-        return new Covered(selection.Digests.Where(d => !hidden.Contains(d)).ToHashSet(StringComparer.Ordinal), unknown, notSearched,
-            selection.NotLoaded.Count > 0);
+        var unknown = (names ?? []).Distinct(StringComparer.Ordinal).Where(n => !Keys(n).Any(Visible)).ToList();
+        return new Covered(selection.Digests.Where(d => !hidden.Contains(d)).ToHashSet(StringComparer.Ordinal), unknown,
+            names is null && selection.NotLoaded.Count > 0);
     }
 
     private static async Task<JsonObject> SearchAsync(PackageSet set, MocaMcpOptions mcp, Dictionary<string, JsonElement> args, CancellationToken cancellationToken)
     {
         var names = Strings(args, "packages");
-        var selection = Visible(set, await set.SelectAsync(names, cancellationToken).ConfigureAwait(false), names, Hidden(set, mcp));
+        var selection = await SelectVisibleAsync(set, mcp, names, cancellationToken).ConfigureAwait(false);
         var (backend, mode, note, missing) = Backend(set, selection, Closed(set, mcp), String(args, "mode"));
         var search = new MocaSearch(set.Library, backend, mcp.Audiences, mcp.SearchHooks) { AllowUnlabelled = mcp.AllowUnlabelled };
         var query = args["query"].GetString()!;
@@ -428,14 +427,10 @@ internal static class MocaServer
             result["unknownPackages"] = new JsonArray([.. selection.Unknown.Select(u => (JsonNode)u)]);
         }
 
-        if (selection.NotSearched.Count > 0)
-        {
-            result["notSearched"] = new JsonArray([.. selection.NotSearched.Select(u => (JsonNode)u)]);
-        }
-
+        // Only a call over every package says the budget left some out; a named call answers each name as above.
         if (selection.Partial)
         {
-            result["note"] = "Some packages were not searched: the server's memory budget is full. Name fewer packages with the packages argument, or ask again for the ones not searched.";
+            result["note"] = "Some packages were not searched: the server's memory budget is full. Name the packages you need with the packages argument.";
         }
     }
 
@@ -448,7 +443,7 @@ internal static class MocaServer
         Func<IEnumerable<CitationRecord>, IReadOnlyList<CitationRecord>> permitted, CancellationToken cancellationToken)
     {
         var names = Strings(args, "packages");
-        var selection = Visible(set, await set.SelectAsync(names, cancellationToken).ConfigureAwait(false), names, Hidden(set, mcp));
+        var selection = await SelectVisibleAsync(set, mcp, names, cancellationToken).ConfigureAwait(false);
         var op = args["op"].GetString()!;
         var iri = args["iri"].GetString()!;
         var transitive = Bool(args, "transitive") ?? false;
@@ -744,5 +739,5 @@ internal static class MocaServer
     }
 }
 
-/// <summary>What a call covers, as the model may be told it: see <c>MocaServer.Visible</c>.</summary>
-internal sealed record Covered(IReadOnlySet<string> Digests, IReadOnlyList<string> Unknown, IReadOnlyList<string> NotSearched, bool Partial);
+/// <summary>What a call covers, as the model may be told it: see <c>MocaServer.SelectVisibleAsync</c>.</summary>
+internal sealed record Covered(IReadOnlySet<string> Digests, IReadOnlyList<string> Unknown, bool Partial);

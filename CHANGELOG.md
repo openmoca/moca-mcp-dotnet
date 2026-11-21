@@ -22,8 +22,9 @@ All notable changes to moca-mcp for .NET (`OpenMoca.Mcp`). The format follows
   package's labels and definitions are not there. `moca_list_packages` and `moca_package_info` give the Reader's
   catalogue: a closed package has exactly `id`, `version`, `title`, `publisher`, `signed` and `closedBy`.
 - A creator can hide a closed package with `ai.allowed.mention: false`. A hidden package gets exactly the answer
-  for a package the server does not have, from every tool and resource. It is left out of lists before paging, out
-  of `unknownPackages` and `notSearched` (as an unknown name), and out of every note. An open package's details
+  for a package the server does not have, from every tool and resource. Named in a call, it is in
+  `unknownPackages`, as an unknown name is. It is left out of lists before paging and out of every note, and it never
+  uses up the memory budget a package that may be served needs. An open package's details
   leave out members and relations that name a hidden package, and findings about a closed or hidden package.
 - `MocaMcpServer.CreateAsync` refuses a `MocaMcpOptions.Terms` with no `ai` part: the server always has a
   destination.
@@ -40,8 +41,9 @@ All notable changes to moca-mcp for .NET (`OpenMoca.Mcp`). The format follows
   `publisher` and `tags` are new; `members` lists member ids.
 - `moca_package_info` answers "no package" for a package that could not be loaded, as for one it does not have. Why
   it could not be loaded is in the server's log.
-- `notSearched` names only packages the call named. A call over every package says only that some were not
-  searched.
+- A package named in a call that is unknown, hidden, not valid, or not loaded for the memory budget gets one answer:
+  it is in `unknownPackages`. `notSearched` is gone. A call over every package says only that some were not
+  searched, and names none.
 - `resources/read` with an address that names no version gives the newest version that may be served, as
   `moca_get_node` does.
 

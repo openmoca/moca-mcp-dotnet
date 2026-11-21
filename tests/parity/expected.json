@@ -6254,7 +6254,7 @@
                 "evidenceMatched": null
               }
             ],
-            "note": "Some packages were not searched: the server's memory budget is full. Name fewer packages with the packages argument, or ask again for the ones not searched."
+            "note": "Some packages were not searched: the server's memory budget is full. Name the packages you need with the packages argument."
           }
         },
         {
