@@ -31,7 +31,7 @@ permissions:
 
 env:
   # Used by the dry run only, until OpenMoca.Reader 0.7.0 is on NuGet. Move it with test.yml's pin.
-  MOCA_READER_DOTNET_REF: 786ff2fc335235a549fa151e7318c2890723ce85  # release-0.7.0 (0.7.0 release candidate); v0.7.0 once tagged
+  MOCA_READER_DOTNET_REF: 8bc0e0ebe4bbc7667dc014eb2fb9ca8ddef91549  # v0.7.0
 
 jobs:
   build:
