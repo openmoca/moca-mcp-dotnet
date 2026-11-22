@@ -14,9 +14,11 @@ using OpenMoca.Reader.Structure;
 namespace OpenMoca.Mcp;
 
 /// <summary>
-/// The MCP server over a library: the four tools and the node resources, with the definitions in definitions.json
-/// and the answers tests/parity expects. Every result is a citation record or built from them; package text is returned
-/// as data inside records, never as instructions (Reader contract §12).
+/// The MCP server over a library: the five tools and the node resources, with the definitions in definitions.json
+/// and the answers tests/parity expects. Every result is a citation record, a structure answer or a catalogue entry;
+/// package text is returned as data in JSON fields, never inside the server's own sentences or as instructions (Reader
+/// contract §12). Everything goes through the creator's terms for the host's destination (contract §15.4, moca-spec
+/// ADR-0041): a package hidden for it gets the not-found answer, and nothing the server says names it.
 /// </summary>
 internal static class MocaServer
 {
@@ -79,11 +81,11 @@ internal static class MocaServer
 
                     return await set.RunAsync(async () => call.Name switch
                     {
-                        "moca_list_packages" => Text(ListPackages(set)),
+                        "moca_list_packages" => Text(await ListPackagesAsync(set, options, cancellationToken).ConfigureAwait(false)),
                         "moca_search" => Text(await SearchAsync(set, options, args, cancellationToken).ConfigureAwait(false)),
                         "moca_structure" => Text(await StructureOfAsync(set, options, args, Allowed, Permitted, cancellationToken).ConfigureAwait(false)),
                         "moca_get_node" => await GetNodeAsync(set, options, args, Allowed, Permitted, cancellationToken).ConfigureAwait(false),
-                        "moca_package_info" => await PackageInfoAsync(set, args, cancellationToken).ConfigureAwait(false),
+                        "moca_package_info" => await PackageInfoAsync(set, options, args, cancellationToken).ConfigureAwait(false),
                         _ => throw new McpProtocolException($"Tool {call.Name} not found", McpErrorCode.InvalidParams),
                     }, cancellationToken).ConfigureAwait(false);
                 },
@@ -114,14 +116,16 @@ internal static class MocaServer
                     var uri = request.Params!.Uri;
                     var isNode = uri.StartsWith(NodeUri, StringComparison.Ordinal);
                     var nodeRef = isNode ? Uri.UnescapeDataString(uri[NodeUri.Length..]) : uri;
+                    // As moca_get_node: the newest version that may be served; a hidden package's node is not there.
                     var record = isNode
                         ? await set.RunAsync(async () =>
                         {
                             await set.SelectAsync([PackageOf(nodeRef)], cancellationToken).ConfigureAwait(false);
-                            return set.Library.Get(nodeRef);
+                            var hidden = Hidden(set, options);
+                            return Permitted(Versions(set, nodeRef, null).OfType<CitationRecord>().Where(r => Allowed(r) && !hidden.Contains(r.Package.Digest)))
+                                .OrderByDescending(r => r.Package.Version, VersionOrder.Instance).FirstOrDefault();
                         }, cancellationToken).ConfigureAwait(false)
                         : null;
-                    record = record is not null && Allowed(record) ? await set.RunAsync(() => Task.FromResult(Permitted([record]).FirstOrDefault()), cancellationToken).ConfigureAwait(false) : null;
                     if (record is null)
                     {
                         throw new McpProtocolException($"no node {nodeRef}", McpErrorCode.InvalidParams);
@@ -148,47 +152,94 @@ internal static class MocaServer
         return hash < 0 ? node : node[..hash];
     }
 
-    private static JsonArray ListPackages(PackageSet set) => new([.. set.Entries.Select(e =>
+    /// <summary>
+    /// The catalogue (Reader contract §15.4, "The catalogue rule"): every package the server can serve is loaded, within
+    /// the memory budget, so its terms, audience and findings are known; then each gets the entry the Reader gives it.
+    /// An open package's entry adds what the server knows of it; a closed package's is exactly its catalogue entry; a
+    /// hidden package, or one that could not be loaded, has none. Ordered by id, then version.
+    /// </summary>
+    private static async Task<JsonArray> ListPackagesAsync(PackageSet set, MocaMcpOptions mcp, CancellationToken cancellationToken)
     {
-        var package = new JsonObject { ["id"] = e.Id, ["version"] = e.Version };
-        if (e.Title is not null)
-        {
-            package["title"] = e.Title;
-        }
-
-        if (e.Description is not null)
-        {
-            package["description"] = e.Description;
-        }
-
-        var result = set.ResultFor(e.Key);
-        package["loaded"] = result is not null;
-        if (result is not null)
-        {
-            package["digest"] = result.Digest;
-            package["signed"] = result.Signers.Count > 0;
-            package["capabilities"] = new JsonArray([.. result.Capabilities.Select(c => (JsonNode)c)]);
-            package["nodes"] = result.Nodes.Count;
-            package["searchMode"] = set.HasChunks(e.Key) ? "sidecar" : "lexical";
-            AddSemantic(package, set, result.Digest!);
-            var members = result.Members.Where(m => m.Result is { Valid: true }).Select(m => (JsonNode)$"{m.Result!.Id}@{m.Result.Version}").ToList();
-            if (members.Count > 0)
+        await set.SelectAsync(null, cancellationToken).ConfigureAwait(false);
+        var served = set.Entries.Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
+        return new([.. set.Library.Catalogue(CatalogueOptions(mcp))
+            .Where(c => served.Contains($"{c.Id}@{c.Version}"))
+            .Select(c =>
             {
-                package["members"] = new JsonArray([.. members]);
+                var package = Entry(c);
+                if (!c.Closed && set.ResultFor($"{c.Id}@{c.Version}") is { } result)
+                {
+                    package["digest"] = result.Digest;
+                    package["capabilities"] = new JsonArray([.. result.Capabilities.Select(x => (JsonNode)x)]);
+                    package["nodes"] = result.Nodes.Count;
+                    package["searchMode"] = set.HasChunks($"{c.Id}@{c.Version}") ? "sidecar" : "lexical";
+                    AddSemantic(package, set, result.Digest!);
+                }
+
+                return (JsonNode)package;
+            })]);
+    }
+
+    /// <summary>The catalogue options for the host's settings: its terms request, audience set and opt-ins.</summary>
+    private static CatalogueOptions CatalogueOptions(MocaMcpOptions mcp) => new()
+    {
+        Terms = mcp.Terms,
+        Audiences = mcp.Audiences,
+        AllowUnlabelled = mcp.AllowUnlabelled,
+        IncludeAll = mcp.IncludeExcluded,
+    };
+
+    /// <summary>A catalogue entry as JSON: package-supplied text in its own fields (Reader contract §12).</summary>
+    private static JsonObject Entry(CatalogueEntry entry) => JsonSerializer.SerializeToNode(entry, CitationJson.Options)!.AsObject();
+
+    /// <summary>The loaded packages hidden for the host's terms request (Reader contract §15.4, "Closed and hidden").</summary>
+    internal static HashSet<string> Hidden(PackageSet set, MocaMcpOptions mcp) =>
+        set.Library.Packages.Select(p => p.Result.Digest!)
+            .Where(d => set.Library.ClosureOf(d, mcp.Terms)?.Hidden == true)
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>The loaded packages closed for the host's terms request, hidden or not.</summary>
+    private static HashSet<string> Closed(PackageSet set, MocaMcpOptions mcp) =>
+        set.Library.Packages.Select(p => p.Result.Digest!)
+            .Where(d => set.Library.ClosureOf(d, mcp.Terms)?.Closed == true)
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Loads what a call covers and says it as the model may be told it (Reader contract §15.4, "Nothing names a hidden
+    /// package"). A name the caller gave that matches no package the model may be told of, whether unknown, hidden, not
+    /// valid, or not loaded for the memory budget, is in <see cref="Covered.Unknown"/>: one answer for all four, so
+    /// they cannot be told apart. A hidden package never takes the memory budget from a package that may be served:
+    /// when the budget stopped a named package loading and a hidden or invalid one was named, the call loads again
+    /// without those names. Packages the caller did not name are never named.
+    /// </summary>
+    private static async Task<Covered> SelectVisibleAsync(PackageSet set, MocaMcpOptions mcp, IReadOnlyList<string>? names, CancellationToken cancellationToken)
+    {
+        var selection = await set.SelectAsync(names, cancellationToken).ConfigureAwait(false);
+        var hidden = Hidden(set, mcp);
+        List<string> Keys(string name) => [.. set.Entries.Where(e => e.Key == name || e.Id == name).Select(e => e.Key)];
+        bool Visible(string key) => set.ResultFor(key)?.Digest is { } d && !hidden.Contains(d);
+
+        if (names is not null && selection.NotLoaded.Count > 0)
+        {
+            // Names that took no budget a served package could use: unknown, or every version hidden or not valid.
+            var gone = names.Where(n => Keys(n) is var keys && keys.All(k => !Visible(k) && !selection.NotLoaded.Contains(k))).ToHashSet(StringComparer.Ordinal);
+            if (gone.Count > 0)
+            {
+                selection = await set.SelectAsync([.. names.Where(n => !gone.Contains(n))], cancellationToken).ConfigureAwait(false);
+                hidden = Hidden(set, mcp);
             }
         }
-        else if (set.ProblemFor(e.Key) is { } problem)
-        {
-            package["problem"] = problem;
-        }
 
-        return (JsonNode)package;
-    })]);
+        var unknown = (names ?? []).Distinct(StringComparer.Ordinal).Where(n => !Keys(n).Any(Visible)).ToList();
+        return new Covered(selection.Digests.Where(d => !hidden.Contains(d)).ToHashSet(StringComparer.Ordinal), unknown,
+            names is null && selection.NotLoaded.Count > 0);
+    }
 
     private static async Task<JsonObject> SearchAsync(PackageSet set, MocaMcpOptions mcp, Dictionary<string, JsonElement> args, CancellationToken cancellationToken)
     {
-        var selection = await set.SelectAsync(Strings(args, "packages"), cancellationToken).ConfigureAwait(false);
-        var (backend, mode, note) = Backend(set, selection, String(args, "mode"));
+        var names = Strings(args, "packages");
+        var selection = await SelectVisibleAsync(set, mcp, names, cancellationToken).ConfigureAwait(false);
+        var (backend, mode, note, missing) = Backend(set, selection, Closed(set, mcp), String(args, "mode"));
         var search = new MocaSearch(set.Library, backend, mcp.Audiences, mcp.SearchHooks) { AllowUnlabelled = mcp.AllowUnlabelled };
         var query = args["query"].GetString()!;
         var options = new SearchOptions
@@ -208,7 +259,8 @@ internal static class MocaServer
             ["query"] = query,
             ["results"] = Bounded(records, String(args, "detail") == "full", mcp, out var truncated),
         };
-        AddBoundNotes(result, truncated, search.Diagnostics.Any(d => d.Code == OpenMoca.Reader.Diagnostics.DiagnosticCodes.U004TermsExcluded), mcp);
+        // Hidden packages are not searched, so U004 counts none of their records; a note never counts them (§15.4).
+        AddBoundNotes(result, truncated, search.Diagnostics.Any(d => d.Code == OpenMoca.Reader.Diagnostics.DiagnosticCodes.U004TermsExcluded && (d.Hidden ?? 0) == 0), mcp);
         if (mode != "lexical" || String(args, "mode") is not null)
         {
             result["mode"] = mode;
@@ -219,6 +271,12 @@ internal static class MocaServer
             result["modeNote"] = note;
         }
 
+        // Model names come from the packages' indexes: package-supplied text, so a field of their own (contract §12).
+        if (missing.Count > 0)
+        {
+            result["missingModels"] = new JsonArray([.. missing.Select(m => (JsonNode)m)]);
+        }
+
         AddSelectionNotes(result, selection);
         return result;
     }
@@ -226,12 +284,13 @@ internal static class MocaServer
     /// <summary>
     /// The backend for a search: lexical over every selected package; semantic over those whose index an installed
     /// model can search (one dense search per model, fused by rank when there are several); hybrid fuses the two.
-    /// When meaning search is asked for but unavailable, it says why and searches by words.
+    /// When meaning search is asked for but unavailable, it says why and searches by words. A closed package's index is
+    /// not looked at: nothing it returns may be handed on, and the note says nothing about it.
     /// </summary>
-    private static (ISearchBackend Backend, string Mode, string? Note) Backend(PackageSet set, Selection selection, string? requested)
+    private static (ISearchBackend Backend, string Mode, string? Note, IReadOnlyList<string> Missing) Backend(PackageSet set, Covered selection, IReadOnlySet<string> closed, string? requested)
     {
         var lexical = new SelectedPackages(set.Backend, selection.Digests);
-        var semantic = selection.Digests.Select(d => (Digest: d, Info: set.SemanticOf(d))).Where(x => x.Info is not null).ToList();
+        var semantic = selection.Digests.Where(d => !closed.Contains(d)).Select(d => (Digest: d, Info: set.SemanticOf(d))).Where(x => x.Info is not null).ToList();
         var groups = semantic.Where(x => x.Info!.Value.Embedder is not null)
             .GroupBy(x => x.Info!.Value.Embedder!)
             .Select(g => (ISearchBackend)new SelectedPackages(set.DenseFor(g.Key), g.Select(x => x.Digest).ToHashSet(StringComparer.Ordinal)))
@@ -242,7 +301,7 @@ internal static class MocaServer
         if (missing.Count > 0)
         {
             var install = missing.Select(n => OpenMoca.Reader.Onnx.StandardModel.Find(n)?.Id).OfType<string>().ToList();
-            note = $"Some packages' indexes need a model that is not installed ({string.Join(", ", missing)}); they were searched by words."
+            note = "Some packages' indexes need a model that is not installed (missingModels); they were searched by words."
                 + (install.Count > 0 ? $" To search them by meaning, run: moca-mcp models add {string.Join(' ', install)}" : "");
         }
 
@@ -250,15 +309,15 @@ internal static class MocaServer
         if (mode != "lexical" && groups.Count == 0)
         {
             note ??= "None of these packages has an index built with an installed model, so they were searched by words.";
-            return (lexical, "lexical", note);
+            return (lexical, "lexical", note, missing);
         }
 
         var dense = groups.Count == 1 ? groups[0] : new FusedBackend(groups);
         return mode switch
         {
-            "semantic" => (dense, mode, note),
-            "hybrid" => (new HybridBackend(lexical, dense), mode, note),
-            _ => (lexical, "lexical", note),
+            "semantic" => (dense, mode, note, missing),
+            "hybrid" => (new HybridBackend(lexical, dense), mode, note, missing),
+            _ => (lexical, "lexical", note, missing),
         };
     }
 
@@ -360,18 +419,18 @@ internal static class MocaServer
         return text[..end];
     }
 
-    // What a call could not cover, said in the answer so the model can act on it.
-    private static void AddSelectionNotes(JsonObject result, Selection selection)
+    // What a call could not cover, said in the answer so the model can act on it. Only names the caller gave.
+    private static void AddSelectionNotes(JsonObject result, Covered selection)
     {
         if (selection.Unknown.Count > 0)
         {
             result["unknownPackages"] = new JsonArray([.. selection.Unknown.Select(u => (JsonNode)u)]);
         }
 
-        if (selection.NotLoaded.Count > 0)
+        // Only a call over every package says the budget left some out; a named call answers each name as above.
+        if (selection.Partial)
         {
-            result["notSearched"] = new JsonArray([.. selection.NotLoaded.Select(u => (JsonNode)u)]);
-            result["note"] = "Some packages were not searched: the server's memory budget is full. Name fewer packages with the packages argument, or ask again for the ones not searched.";
+            result["note"] = "Some packages were not searched: the server's memory budget is full. Name the packages you need with the packages argument.";
         }
     }
 
@@ -383,11 +442,14 @@ internal static class MocaServer
     private static async Task<JsonObject> StructureOfAsync(PackageSet set, MocaMcpOptions mcp, Dictionary<string, JsonElement> args, Func<CitationRecord, bool> allowed,
         Func<IEnumerable<CitationRecord>, IReadOnlyList<CitationRecord>> permitted, CancellationToken cancellationToken)
     {
-        var selection = await set.SelectAsync(Strings(args, "packages"), cancellationToken).ConfigureAwait(false);
+        var names = Strings(args, "packages");
+        var selection = await SelectVisibleAsync(set, mcp, names, cancellationToken).ConfigureAwait(false);
         var op = args["op"].GetString()!;
         var iri = args["iri"].GetString()!;
         var transitive = Bool(args, "transitive") ?? false;
-        var s = set.Library.Structure;
+        // Reader contract §10 and §15.4: the structure of the packages not closed for the host's request, and the
+        // overlays. Labels and definitions only a closed package states are not there.
+        var s = set.Library.StructureFor(mcp.Terms);
         var bound = false;
         int? next = null;
         JsonNode? Nodes()
@@ -433,22 +495,30 @@ internal static class MocaServer
         return result;
     }
 
+    /// <summary>
+    /// The loaded records a node id or ref names: a ref (<c>id@version#path</c>) names that version; an id without a
+    /// version (<c>id#path</c>) names every loaded version, so the caller can serve the newest one that may be served.
+    /// </summary>
+    private static List<CitationRecord?> Versions(PackageSet set, string nodeId, string? locale)
+    {
+        var package = PackageOf(nodeId);
+        var hash = nodeId.LastIndexOf('#');
+        return hash < 0 || package.Contains('@', StringComparison.Ordinal)
+            ? [set.Library.Get(nodeId, locale)]
+            : [.. set.Library.Packages.Where(p => p.Result.Id == package)
+                .Select(p => set.Library.Get($"{package}@{p.Result.Version}{nodeId[hash..]}", locale))];
+    }
+
     private static async Task<CallToolResult> GetNodeAsync(PackageSet set, MocaMcpOptions mcp, Dictionary<string, JsonElement> args, Func<CitationRecord, bool> allowed,
         Func<IEnumerable<CitationRecord>, IReadOnlyList<CitationRecord>> permitted, CancellationToken cancellationToken)
     {
         var nodeId = args["node_id"].GetString()!;
         var locale = String(args, "locale");
-        var package = PackageOf(nodeId);
-        await set.SelectAsync([package], cancellationToken).ConfigureAwait(false);
-        var hash = nodeId.LastIndexOf('#');
-        // An id without a version (id#path) means the newest loaded version that may be served; a ref
-        // (id@version#path) means that version.
-        var versions = hash < 0 || package.Contains('@', StringComparison.Ordinal)
-            ? [set.Library.Get(nodeId, locale)]
-            : set.Library.Packages.Where(p => p.Result.Id == package)
-                .Select(p => set.Library.Get($"{package}@{p.Result.Version}{nodeId[hash..]}", locale))
-                .ToList();
-        var found = versions.OfType<CitationRecord>().Where(allowed).ToList();
+        await set.SelectAsync([PackageOf(nodeId)], cancellationToken).ConfigureAwait(false);
+        var versions = Versions(set, nodeId, locale);
+        // A node in a hidden package is not there (Reader contract §15.4): the answer is the one for no such node.
+        var hidden = Hidden(set, mcp);
+        var found = versions.OfType<CitationRecord>().Where(r => allowed(r) && !hidden.Contains(r.Package.Digest)).ToList();
         var served = permitted(found).OrderByDescending(r => r.Package.Version, VersionOrder.Instance).ToList();
         if (served.Count == 0)
         {
@@ -465,26 +535,45 @@ internal static class MocaServer
         return Text(json);
     }
 
-    private static async Task<CallToolResult> PackageInfoAsync(PackageSet set, Dictionary<string, JsonElement> args, CancellationToken cancellationToken)
+    /// <summary>
+    /// One package's details (Reader contract §15.4, "The catalogue rule"). A package with no catalogue entry (hidden for
+    /// the request, outside the audience, or not loadable) gets exactly the answer for an unknown package. A closed
+    /// package gets exactly its catalogue entry. An open package gets what the Reader found, with every member or
+    /// relation that names a package without an entry left out, and no finding about a closed or hidden package.
+    /// </summary>
+    private static async Task<CallToolResult> PackageInfoAsync(PackageSet set, MocaMcpOptions mcp, Dictionary<string, JsonElement> args, CancellationToken cancellationToken)
     {
         var name = args["package"].GetString()!;
-        var selection = await set.SelectAsync([name], cancellationToken).ConfigureAwait(false);
-        var entry = set.Entries.FirstOrDefault(e => e.Key == name) ?? set.Entries.LastOrDefault(e => e.Id == name);
-        if (entry is null)
+        await set.SelectAsync([name], cancellationToken).ConfigureAwait(false);
+        var catalogue = set.Library.Catalogue(CatalogueOptions(mcp));
+        var listed = catalogue.ToDictionary(c => $"{c.Id}@{c.Version}", StringComparer.Ordinal);
+        // As before, a key names that version and an id the last version listed; now only among packages with an entry.
+        var entry = set.Entries.FirstOrDefault(e => e.Key == name && listed.ContainsKey(e.Key))
+            ?? set.Entries.LastOrDefault(e => e.Id == name && listed.ContainsKey(e.Key));
+        if (entry is null || set.ResultFor(entry.Key) is not { } result)
         {
             return Error(new JsonObject { ["error"] = $"no package {name}" });
         }
 
-        if (set.ResultFor(entry.Key) is not { } result)
+        var own = listed[entry.Key];
+        if (own.Closed)
         {
-            return Error(new JsonObject { ["error"] = $"package {entry.Key} could not be loaded", ["problem"] = set.ProblemFor(entry.Key) });
+            return Text(Entry(own));
         }
+
+        // Packages a model may be told of in full: open, with an entry. Closed ones by id and version only.
+        var open = catalogue.Where(c => !c.Closed).Select(c => $"{c.Id}@{c.Version}").ToHashSet(StringComparer.Ordinal);
+        var hidden = Hidden(set, mcp);
+        var hiddenIds = set.Library.Packages.Where(p => hidden.Contains(p.Result.Digest!)).Select(p => p.Result.Id).ToHashSet(StringComparer.Ordinal);
+        var notOpen = result.Members.Where(m => !open.Contains($"{m.Reference.Id}@{m.Reference.Version}")).Select(m => m.Reference.Id)
+            .Concat(hiddenIds).Where(id => id != result.Id).ToHashSet(StringComparer.Ordinal);
+        bool Named(string key) => listed.ContainsKey(key);
 
         var info = new JsonObject
         {
             ["id"] = result.Id,
             ["version"] = result.Version,
-            ["manifest"] = result.Manifest?.DeepClone(),
+            ["manifest"] = Manifest(result.Manifest, Named, hiddenIds),
             ["digest"] = result.Digest,
             ["signed"] = result.Signers.Count > 0,
             ["signers"] = new JsonArray([.. result.Signers.Select(x => (JsonNode)x)]),
@@ -501,21 +590,63 @@ internal static class MocaServer
             ["capabilities"] = new JsonArray([.. result.Capabilities.Select(c => (JsonNode)c)]),
             ["profiles"] = new JsonArray([.. result.Profiles.Select(c => (JsonNode)c)]),
             ["nodes"] = result.Nodes.Count,
-            ["members"] = new JsonArray([.. result.Members.Select(m => (JsonNode)new JsonObject
-            {
-                ["id"] = m.Reference.Id,
-                ["version"] = m.Reference.Version,
-                ["digest"] = m.Reference.Digest,
-                ["status"] = m.Status,
-            })]),
+            ["members"] = new JsonArray([.. result.Members
+                .Where(m => Named($"{m.Reference.Id}@{m.Reference.Version}"))
+                .Select(m => (JsonNode)(open.Contains($"{m.Reference.Id}@{m.Reference.Version}")
+                    ? new JsonObject
+                    {
+                        ["id"] = m.Reference.Id,
+                        ["version"] = m.Reference.Version,
+                        ["digest"] = m.Reference.Digest,
+                        ["status"] = m.Status,
+                    }
+                    : new JsonObject { ["id"] = m.Reference.Id, ["version"] = m.Reference.Version }))]),
             ["searchMode"] = set.HasChunks(entry.Key) ? "sidecar" : "lexical",
             // Reader contract §15.1: the creator's terms as written, their problems and who stated them.
             ["terms"] = result.Terms is { } terms ? JsonSerializer.SerializeToNode(terms, CitationJson.Options) : null,
-            ["findings"] = new JsonArray([.. result.Diagnostics.Select(d => JsonSerializer.SerializeToNode(d, CitationJson.Options))]),
+            // Contract §15.4: no finding about a closed or hidden package, such as a member's.
+            ["findings"] = new JsonArray([.. result.Diagnostics
+                .Where(d => !notOpen.Any(id => d.Message.Contains(id, StringComparison.Ordinal) || (d.File?.Contains(id, StringComparison.Ordinal) ?? false)))
+                .Select(d => JsonSerializer.SerializeToNode(d, CitationJson.Options))]),
         };
         AddSemantic(info, set, result.Digest!);
-        AddSelectionNotes(info, selection);
         return Text(info);
+    }
+
+    /// <summary>
+    /// An open package's manifest as a model may see it (Reader contract §15.4): members without a catalogue entry left
+    /// out, and relations to a package hidden for the request left out.
+    /// </summary>
+    private static JsonNode? Manifest(JsonNode? manifest, Func<string, bool> named, IReadOnlySet<string> hiddenIds)
+    {
+        if (manifest?.DeepClone() is not JsonObject copy)
+        {
+            return manifest?.DeepClone();
+        }
+
+        if (copy["members"] is JsonArray members)
+        {
+            foreach (var m in members.ToList())
+            {
+                if (m is not JsonObject member || !named($"{Catalogue.Text(member["id"])}@{Catalogue.Text(member["version"])}"))
+                {
+                    members.Remove(m);
+                }
+            }
+        }
+
+        if (copy["relations"] is JsonArray relations)
+        {
+            foreach (var r in relations.ToList())
+            {
+                if (r is JsonObject relation && Catalogue.Text(relation["target"]) is { } target && hiddenIds.Contains(target))
+                {
+                    relations.Remove(r);
+                }
+            }
+        }
+
+        return copy;
     }
 
     /// <summary>A citation record reduced to what a model needs in context, as moca-mcp's <c>compactRecord</c>.</summary>
@@ -607,3 +738,6 @@ internal static class MocaServer
         return (tools, templates);
     }
 }
+
+/// <summary>What a call covers, as the model may be told it: see <c>MocaServer.SelectVisibleAsync</c>.</summary>
+internal sealed record Covered(IReadOnlySet<string> Digests, IReadOnlyList<string> Unknown, bool Partial);

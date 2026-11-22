@@ -44,6 +44,12 @@ public sealed class MocaMcpServer
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(source);
+        // Reader interface §7: a binding a model calls passes a terms request with an ai part to everything it hands on.
+        if (options.Terms?.Ai is null)
+        {
+            throw new ArgumentException("MocaMcpOptions.Terms needs an ai part: the destination of the model the server answers (Reader contract §15.4).", nameof(options));
+        }
+
         var log = logger ?? NullLogger.Instance;
         var set = await PackageSet.CreateAsync(options, source, m => log.LogInformation("{Message}", m), cancellationToken).ConfigureAwait(false);
         return new MocaMcpServer(set, MocaServer.Options(set, options));
